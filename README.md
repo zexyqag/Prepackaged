@@ -39,20 +39,20 @@ Lines from your own `keysB42.ini`, `ModOptions.ini`, a sandbox preset and the se
 ```
 # Prepackaged pack file
 @pack
-id = MartyPack
-name = Marty's Apocalypse
+id = ExamplePack
+name = Example Pack
 version = 3
-collection = 3830000001
-WorkshopItems = 3830000099;3830000098;3820511464
-Mods = Prepackaged;MartyPackDefaults;Crepuscular
+collection = 3000000001
+WorkshopItems = 3000000101;3000000102;3000000103
+Mods = Prepackaged;ExamplePackDefaults;ExampleWeapons
 Map = Muldraugh, KY
 
 @optional
-BetterSorting = Better Sorting
+ExampleMap = Map: Example Town
 
 @collections
-3830000001 = Marty's Apocalypse | c:3830000002;3830000099;3830000098
-3830000002 = Maps | 3820511464
+3000000001 = Example Pack | c:3000000002;3000000101;3000000102
+3000000002 = Maps | 3000000103
 ```
 
 `@keys`, `@modoptions`, `@sandbox` and `@locks` are read and checked already; applying them comes in later versions.
