@@ -1,5 +1,6 @@
 require "ISUI/ISPanel"
 local Discovery = require "Prepackaged/Discovery"
+local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local RestoreWindow = require "Prepackaged/UI/RestoreWindow"
 local ReviewWindow = require "Prepackaged/UI/ReviewWindow"
@@ -79,12 +80,17 @@ function PackWindow:statusText(current)
     return getText("UI_Prepackaged_Current", Rows.name(current.result.pack), state.applied)
 end
 
+local function found(window)
+    local entries = Discovery.all()
+    if window.pasted ~= nil then
+        entries[#entries + 1] = window.pasted
+    end
+    return entries
+end
+
 function PackWindow:refresh(wanted)
     self.state = Files.loadState()
-    local entries = Discovery.all()
-    if self.pasted ~= nil then
-        entries[#entries + 1] = self.pasted
-    end
+    local entries = found(self)
     self.list:clear()
     local current, selected = nil, 1
     for i, entry in ipairs(entries) do
@@ -119,7 +125,7 @@ function PackWindow:onSelect(data)
         self.useButton:setEnable(false)
         return
     end
-    self.details:setRows(Rows.details(self.entry, self.state))
+    self.details:setRows(Rows.details(self.entry, self.state, Enable.packConflicts(self.entry), Enable.nameOf))
     self.useButton:setEnable(#self.entry.result.errors == 0)
     self.useButton:setTitle(getText(Discovery.isUpdate(self.entry, self.state) and "UI_Prepackaged_Update" or "UI_Prepackaged_Use"))
 end
@@ -128,6 +134,12 @@ function PackWindow:onPaste()
     local entry = Discovery.fromClipboard()
     if entry == nil then
         Widgets.tell({ getText("UI_Prepackaged_ClipboardEmpty"), getText("UI_Prepackaged_ClipboardHow") })
+        return
+    end
+    local listed = Discovery.sameAs(found(self), entry)
+    if listed ~= nil then
+        self:refresh(listed)
+        self.status = getText("UI_Prepackaged_AlreadyListed")
         return
     end
     self.pasted = entry

@@ -14,7 +14,7 @@ A Project Zomboid Build 42 mod that turns a mod pack into a guided setup. A pack
 3. Select a pack and press **Use this pack**. The review shows the optional mods to tick, the mods that get enabled and disabled, and how many of the pack's mods are not installed.
 4. **Apply** backs up your mod list in use, in its exact load order and with its map order, then puts the pack's list in place and reloads the game's mods. If some of the pack's mods can't be enabled, Apply asks again first. **Save as my preset** saves the reviewed list as a Mods screen preset; those keep the mods, not their order.
 
-Using a pack replaces your mod list. Mods you add afterwards are yours: when the pack updates, only the mods that came from the pack change. Each mod's `require=` mods are put before it, as the game loads them.
+Using a pack replaces your mod list. Mods you add afterwards are yours: when the pack updates, only the mods that came from the pack change. Each mod's `require=` mods are put before it, as the game loads them. Where the pack's order goes against a mod's own `require=`, `loadModAfter=` or `loadModBefore=`, the review and the pack's details list it, and the pack's order is used.
 
 **Restore** in the Prepackaged window lists the backups with their date and number of mods, and puts one back in its exact order, after backing up the list in use. Your list from before Prepackaged is kept for good; of the others, the newest 20 are kept, in `Zomboid/Lua/Prepackaged/backups`.
 

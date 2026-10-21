@@ -25,18 +25,26 @@ function Enable.nameOf(id)
     return info and info:getName()
 end
 
--- require= is split at commas only (ChooseGameInfo.java:225), so "\A, \B" leaves a space.
-function Enable.requires(id)
-    local info = getModInfoByID(id)
-    local list = info and info:getRequire()
-    local result = {}
+-- Each list is split at commas only (ChooseGameInfo.java:224-231), so "\A, \B" leaves a space.
+local function ids(list)
+    local result, seen = {}, {}
     for i = 0, (list and list:size() or 0) - 1 do
-        local need = Text.trim(list:get(i))
-        if need ~= "" then
-            result[#result + 1] = need
+        local id = Text.trim(list:get(i))
+        if id ~= "" and not seen[id] then
+            seen[id] = true
+            result[#result + 1] = id
         end
     end
     return result
+end
+
+function Enable.rules(id)
+    local info = getModInfoByID(id)
+    return {
+        require = ids(info and info:getRequire()),
+        loadModAfter = ids(info and info:getLoadAfter()),
+        loadModBefore = ids(info and info:getLoadBefore()),
+    }
 end
 
 local function items(list)
@@ -58,8 +66,19 @@ end
 function Enable.plan(entry, state, ticks)
     return ModList.plan({
         pack = entry.result.pack, active = Enable.active(), maps = Enable.maps(), state = state, ticks = ticks,
-        status = Enable.status, requires = Enable.requires,
+        status = Enable.status, rules = Enable.rules,
     })
+end
+
+-- For the pack's author: the pack's own list with every optional mod ticked.
+function Enable.packConflicts(entry)
+    local pack, ticks = entry.result.pack, {}
+    for _, optional in ipairs(pack.optional) do
+        ticks[optional.id] = true
+    end
+    return ModList.plan({
+        pack = pack, active = {}, maps = {}, state = State.new(), ticks = ticks, status = Enable.status, rules = Enable.rules,
+    }).conflicts
 end
 
 local function failed(key, ...)

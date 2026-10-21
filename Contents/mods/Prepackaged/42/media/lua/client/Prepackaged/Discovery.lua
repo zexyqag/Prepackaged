@@ -72,6 +72,16 @@ function Discovery.fromClipboard()
     return load({ source = "clipboard" }, function() return Parse.lines(text) end)
 end
 
+-- The same text only: another text with the same id is listed too, and Apply asks before replacing its file.
+function Discovery.sameAs(entries, entry)
+    for _, listed in ipairs(entries) do
+        if Text.same(listed.lines, entry.lines) then
+            return listed
+        end
+    end
+    return nil
+end
+
 local function packFile(entry)
     return entry.result.pack.id .. ".txt"
 end

@@ -38,12 +38,12 @@ end
 -- Each mod after the mods its require= names, theirs first, as Java loads them (ZomboidFileSystem.java:806-837).
 -- The Mods screen's correctAndSaveModOrder (ModSelectorModel.lua:138-163) does this one level deep. Iterative, for
 -- Kahlua's short call stack; a cycle is cut where it closes. The mods already in result stay where they are.
-local function withRequired(ids, requires, result)
+local function withRequired(ids, rules, result)
     local state = set(result)
     for _, root in ipairs(ids) do
         if state[root] == nil then
             state[root] = "open"
-            local stack = { { id = root, needs = requires(root), next = 1 } }
+            local stack = { { id = root, needs = rules(root).require, next = 1 } }
             while #stack > 0 do
                 local frame = stack[#stack]
                 local need = frame.needs[frame.next]
@@ -55,9 +55,41 @@ local function withRequired(ids, requires, result)
                     frame.next = frame.next + 1
                     if state[need] == nil then
                         state[need] = "open"
-                        stack[#stack + 1] = { id = need, needs = requires(need), next = 1 }
+                        stack[#stack + 1] = { id = need, needs = rules(need).require, next = 1 }
                     end
                 end
+            end
+        end
+    end
+    return result
+end
+
+-- The Mods screen's checks, in list order: each require= mod earlier in the list (isCorrectOrder,
+-- ModLoadOrderPanel.lua:275-290), each loadModAfter= mod in the list earlier and each loadModBefore= mod in the list
+-- later (updateModsColor, ModOrderListBox.lua:39-81). Ids come trimmed.
+function ModList.conflicts(mods, rules)
+    local at, result = {}, {}
+    for i, id in ipairs(mods) do
+        at[id] = i
+    end
+    local function add(id, other, rule)
+        result[#result + 1] = { id = id, other = other, rule = rule }
+    end
+    for i, id in ipairs(mods) do
+        local rule = rules(id)
+        for _, other in ipairs(rule.require) do
+            if at[other] == nil or at[other] >= i then
+                add(id, other, "require")
+            end
+        end
+        for _, other in ipairs(rule.loadModAfter) do
+            if at[other] ~= nil and at[other] > i then
+                add(id, other, "loadModAfter")
+            end
+        end
+        for _, other in ipairs(rule.loadModBefore) do
+            if at[other] ~= nil and at[other] < i then
+                add(id, other, "loadModBefore")
             end
         end
     end
@@ -75,7 +107,7 @@ function ModList.ticks(pack, active)
 end
 
 function ModList.plan(args)
-    local pack, active, state = args.pack, args.active, args.state
+    local pack, active, state, rules = args.pack, args.active, args.state, args.rules
     local plan = {
         update = state.current == pack.id,
         active = Text.copy(active), missing = {}, unavailable = {}, optional = {}, extras = {},
@@ -101,16 +133,22 @@ function ModList.plan(args)
             chosen[#chosen + 1] = entry.id
         end
     end
-    plan.fromPack = withRequired(chosen, args.requires, {})
+    plan.fromPack = withRequired(chosen, rules, {})
+    local placed = set(plan.fromPack)
     if plan.update then
-        local previous, placed = set(state.mods), set(plan.fromPack)
+        local previous = set(state.mods)
         for _, id in ipairs(active) do
             if not previous[id] and not packed[id] and not placed[id] then
                 plan.extras[#plan.extras + 1] = id
             end
         end
     end
-    plan.mods = withRequired(plan.extras, args.requires, Text.copy(plan.fromPack))
+    plan.mods = withRequired(plan.extras, rules, Text.copy(plan.fromPack))
+    plan.conflicts, plan.ownConflicts = {}, {}
+    for _, conflict in ipairs(ModList.conflicts(plan.mods, rules)) do
+        local list = placed[conflict.id] and placed[conflict.other] and plan.conflicts or plan.ownConflicts
+        list[#list + 1] = conflict
+    end
     local named = set(chosen)
     for _, id in ipairs(plan.extras) do
         named[id] = true

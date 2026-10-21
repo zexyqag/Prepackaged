@@ -13,6 +13,17 @@ local function mods(rows, list, of)
     end
 end
 
+local function conflicts(rows, heading, list, of)
+    if #list == 0 then
+        return
+    end
+    text(rows, "section", heading)
+    for _, c in ipairs(list) do
+        local key = c.rule == "loadModBefore" and "UI_Prepackaged_ConflictBefore" or "UI_Prepackaged_ConflictAfter"
+        text(rows, "warning", key, of(c.id) or c.id, of(c.other) or c.other, c.rule)
+    end
+end
+
 function Rows.name(pack)
     return pack.name or pack.id
 end
@@ -50,7 +61,7 @@ local function notes(rows, style, heading, list, more)
     end
 end
 
-function Rows.details(entry, state)
+function Rows.details(entry, state, packConflicts, of)
     local result, rows = entry.result, {}
     local pack = result.pack
     local name = Rows.name(pack)
@@ -78,6 +89,7 @@ function Rows.details(entry, state)
     end
     notes(rows, "error", "UI_Prepackaged_DetailErrors", result.errors, result.more.errors)
     notes(rows, "warning", "UI_Prepackaged_DetailWarnings", result.warnings, result.more.warnings)
+    conflicts(rows, "UI_Prepackaged_ReviewConflicts", packConflicts, of)
     return rows
 end
 
@@ -124,6 +136,8 @@ function Rows.review(plan, pack, state, names)
     section("UI_Prepackaged_ReviewMissing", plan.missing)
     section("UI_Prepackaged_ReviewUnavailable", plan.unavailable)
     section("UI_Prepackaged_ReviewKept", plan.kept)
+    conflicts(rows, "UI_Prepackaged_ReviewConflicts", plan.conflicts, names.of)
+    conflicts(rows, "UI_Prepackaged_ReviewOwnConflicts", plan.ownConflicts, names.of)
     if #plan.required > 0 then
         text(rows, "note", "UI_Prepackaged_ReviewRequired", table.concat(plan.required, ", "))
     end
