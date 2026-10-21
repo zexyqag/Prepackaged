@@ -552,6 +552,10 @@ local function finish(ctx, sourceMod)
     if #pack.locks > 0 and ctx.lines.mods[MOC_ID] == nil then
         warn(ctx, pack.locks[1].line, "LocksWithoutMOC", MOC_ID)
     end
+    -- Defaults are noted as mods load: Shipped copies keyBinding and Settings wraps PZAPI.ModOptions.load.
+    if #pack.keys + #pack.modoptions > 0 and ctx.lines.mods[Parse.MOD_ID] ~= nil and pack.mods[1] ~= Parse.MOD_ID then
+        warn(ctx, ctx.lines.mods[Parse.MOD_ID], "NotFirst", Parse.MOD_ID)
+    end
 end
 
 local function newContext()

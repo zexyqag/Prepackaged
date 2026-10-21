@@ -2,5 +2,5 @@ name=Prepackaged
 id=Prepackaged
 description=Turns a mod pack into a guided setup. Finds pack files in installed mods, in Zomboid/Lua/Prepackaged/packs or on the clipboard, and enables a pack's mods in its load order after a review, with optional mods to tick. Your mod list is backed up first in its exact order and can be restored, and your own extra mods are kept when the pack updates. The pack's key binds and mod options are offered in a review, and only what you tick changes.
 poster=poster.png
-modversion=0.2.0
+modversion=0.2.1
 versionMin=42.20

@@ -176,7 +176,7 @@ function Defaults.review(args)
         if value == nil then
             put(review.invalid, item, "KeyName", { m.value })
         elseif target == nil then
-            absent(item, "options", targets.pages[m.page] and "NoOption" or "NotLoaded")
+            absent(item, "options", targets.unread[key] and "NotRead" or targets.pages[m.page] and "NoOption" or "NotLoaded")
         else
             local reason, reasonArgs = "Type", { m.type, target.type }
             if target.type == m.type then

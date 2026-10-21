@@ -43,7 +43,7 @@ end
 local function pages(mo)
     local list = {}
     for _, page in ipairs(mo.Data) do
-        if type(page) == "table" and page.modOptionsID ~= nil and mo.Dict[page.modOptionsID] == page and type(page.data) == "table" then
+        if type(page) == "table" and page.modOptionsID ~= nil and mo.Dict[page.modOptionsID] == page and type(page.data) == "table" and type(page.dict) == "table" then
             list[#list + 1] = page
         end
     end
@@ -51,7 +51,8 @@ local function pages(mo)
 end
 
 -- A mod option's default is what it holds before ModOptions.ini is first loaded into it. Mods make their options
--- when their Lua loads, and the first load comes when the main menu builds the options screen.
+-- when their Lua loads, and the first load comes when the main menu builds the options screen. An option made after
+-- every load doesn't hold the player's value: its line is still in OtherOptions, and a save writes both.
 local defaults = {}
 local function snapshot()
     for _, page in ipairs(pages(PZAPI.ModOptions)) do
@@ -185,18 +186,21 @@ local function readOptions(targets)
         local group = { title = title(page.name, tostring(page.name or id)) }
         targets.pages[id] = group
         for _, option in ipairs(page.data) do
-            local key = type(option) == "table" and TYPES[option.type] and option.id ~= nil and id .. "|" .. option.id
-            if key and targets.options[key] == nil then
+            -- The file is loaded into the option the page's dict holds (ModOptions.lua:305).
+            local key = type(option) == "table" and TYPES[option.type] and option.id ~= nil and page.dict[option.id] == option and id .. "|" .. option.id
+            if key and defaults[option] == nil then
+                targets.unread[key] = true
+            elseif key and targets.options[key] == nil then
                 targets.n = targets.n + 1
                 local target = {
                     kind = "opt", type = option.type, page = id, option = option.id, group = group, pageTitle = group.title,
                     title = title(option.name, tostring(option.name or option.id)), order = targets.n,
-                    current = valueOf(option), default = valueOf(option), enabled = enabled(option), game = option, pageObject = page,
+                    current = valueOf(option), enabled = enabled(option), game = option, pageObject = page,
                 }
                 if option.type == "keybind" then
                     target.default = option.defaultkey
                     targets.keyOptions[#targets.keyOptions + 1] = target
-                elseif defaults[option] ~= nil then
+                else
                     target.default = defaults[option].value
                 end
                 if option.type == "combobox" then
@@ -216,7 +220,7 @@ local function readOptions(targets)
 end
 
 function Settings.read()
-    local targets = { binds = {}, bindList = {}, options = {}, keyOptions = {}, pages = {}, missing = {}, n = 0 }
+    local targets = { binds = {}, bindList = {}, options = {}, keyOptions = {}, pages = {}, unread = {}, missing = {}, n = 0 }
     readBinds(targets)
     readOptions(targets)
     return targets
@@ -374,6 +378,11 @@ local function setOption(option, value)
         option:onChangeApply(value)
     end
     option:setValue(value)
+    -- setValue sets the key the options screen saves, not its button's title (ModOptions.lua:192-197).
+    local element = option.element
+    if option.type == "keybind" and element ~= nil and element.btn ~= nil then
+        element.btn:setTitle(getKeyName(value))
+    end
 end
 
 local function setBind(target, bind)
@@ -404,12 +413,50 @@ local function guard(lines)
     end
 end
 
+local function bindName(line)
+    local i = string.find(line, "=", 1, true)
+    if i ~= nil then
+        return string.sub(line, 1, i - 1), string.sub(line, i + 1)
+    end
+end
+
+-- The game's writers empty the file first: when one stops part way, the file is written back from the backup.
+local function save(path, before, writer, ...)
+    if pcall(writer, ...) then
+        return true
+    end
+    Files.write(path, before, "\r\n")
+    return false
+end
+
+-- saveKeys writes only the binds of mods that are loaded (MainOptions.lua:3706-3714). The lines of the others go back
+-- after them, so a mod enabled again still finds the player's binds.
+local function keepOthers(before)
+    local lines, written = Files.read(Settings.KEYS) or {}, {}
+    local count = #lines
+    for _, line in ipairs(lines) do
+        local name = bindName(line)
+        if name ~= nil then
+            written[name] = true
+        end
+    end
+    for _, line in ipairs(before) do
+        local name = bindName(line)
+        if name ~= nil and not written[name] then
+            lines[#lines + 1] = line
+        end
+    end
+    if #lines > count then
+        Files.write(Settings.KEYS, lines, "\r\n")
+    end
+end
+
 local function savedBinds()
     local saved = {}
     for _, line in ipairs(Files.read(Settings.KEYS) or {}) do
-        local i = string.find(line, "=", 1, true)
-        if i ~= nil then
-            saved[string.sub(line, 1, i - 1)] = Parse.bindSpec(string.sub(line, i + 1))
+        local name, spec = bindName(line)
+        if name ~= nil then
+            saved[name] = Parse.bindSpec(spec)
         end
     end
     return saved
@@ -436,7 +483,7 @@ local function readsBack(item, binds, options)
 end
 
 -- Mod options first: their key binds sit in MainOptions.keyText too, which saveKeys writes into keysB42.ini.
-local function write(binds, options)
+local function write(binds, options, backup)
     local done, touched, order = {}, {}, {}
     for _, item in ipairs(options) do
         if pcall(setOption, item.target.game, item.to) then
@@ -455,13 +502,13 @@ local function write(binds, options)
             done[#done + 1] = item
         end
     end
-    if #binds > 0 then
-        pcall(MainOptions.saveKeys)
+    if #binds > 0 and save(Settings.KEYS, backup.keys, MainOptions.saveKeys) then
+        keepOthers(backup.keys)
     end
     if #options > 0 then
         local mo = PZAPI.ModOptions
         guard(mo.OtherOptions)
-        pcall(mo.save, mo)
+        save(Settings.OPTIONS, backup.options, mo.save, mo)
     end
     local savedB, savedO = savedBinds(), savedOptions()
     local written, count = {}, 0
@@ -494,7 +541,7 @@ function Settings.apply(entry, state, review, ticks)
         if backup == nil then
             return problem
         end
-        written, lost = write(binds, options)
+        written, lost = write(binds, options, backup)
     end
     for _, record in ipairs(Defaults.records(pack.id, review, ticks, written)) do
         State.decide(state, record)
