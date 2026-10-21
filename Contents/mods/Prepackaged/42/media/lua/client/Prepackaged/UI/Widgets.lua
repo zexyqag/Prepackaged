@@ -1,5 +1,5 @@
--- Parts of the Prepackaged screens: PackList for the packs found, RowList for rows from Prepackaged/Rows, and buttons.
 require "ISUI/ISButton"
+require "ISUI/ISModalDialog"
 require "ISUI/ISScrollingListBox"
 
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -15,7 +15,7 @@ local BHC = getCore():getBadHighlitedColor()
 
 local Widgets = {}
 
--- A button in the style of the Mods screen's, wide enough for each of titles; it shows the first.
+-- Wide enough for each of titles, so a title can change without a new layout.
 function Widgets.button(parent, x, y, titles, onClick)
     local width = 0
     for _, title in ipairs(titles) do
@@ -27,6 +27,30 @@ function Widgets.button(parent, x, y, titles, onClick)
     b.borderColor = { r = 1, g = 1, b = 1, a = 0.1 }
     parent:addChild(b)
     return b
+end
+
+local function modal(text, yesno, onClick)
+    local w, h = 400, 120
+    local dialog = ISModalDialog:new((getCore():getScreenWidth() - w) / 2, (getCore():getScreenHeight() - h) / 2, w, h, text, yesno, nil, onClick)
+    dialog:initialise()
+    dialog:addToUIManager()
+    dialog:setAlwaysOnTop(true)
+    dialog:setCapture(true)
+    dialog:bringToTop()
+    return dialog
+end
+
+-- lines are joined with line breaks: the dialog grows to its longest line and doesn't wrap (ISModalDialog.CalcSize).
+function Widgets.tell(lines)
+    return modal(table.concat(lines, "\n"), false)
+end
+
+function Widgets.ask(lines, target, onYes)
+    return modal(table.concat(lines, "\n"), true, function(_, button)
+        if button.internal == "YES" then
+            onYes(target)
+        end
+    end)
 end
 
 local function wrap(text, font, width)
@@ -77,6 +101,7 @@ local STYLES = {
     section = { font = UIFont.Small, top = UI_BORDER_SPACING, indent = 0, r = 1, g = 1, b = 1 },
     text = { font = UIFont.Small, top = 0, indent = 0, r = 0.8, g = 0.8, b = 0.8 },
     note = { font = UIFont.Small, top = UI_BORDER_SPACING / 2, indent = 0, r = 0.7, g = 0.7, b = 0.7 },
+    alert = { font = UIFont.Small, top = UI_BORDER_SPACING / 2, indent = 0, r = 0.9, g = 0.6, b = 0.2 },
     error = { font = UIFont.Small, top = 0, indent = INDENT, r = BHC:getR(), g = BHC:getG(), b = BHC:getB() },
     warning = { font = UIFont.Small, top = 0, indent = INDENT, r = 0.9, g = 0.6, b = 0.2 },
     mod = { font = UIFont.Small, top = 0, indent = INDENT, r = 0.7, g = 0.7, b = 0.7 },
@@ -95,7 +120,6 @@ function RowList:new(x, y, width, height)
     return o
 end
 
--- onTick(target, row) is called when a tick row of an installed mod is clicked.
 function RowList:setOnTick(target, onTick)
     self.tickTarget = target
     self.onTick = onTick
@@ -163,7 +187,6 @@ function PackList:new(x, y, width, height)
     return o
 end
 
--- item: { entry, title, detail, color = "good" | "bad" | nil }
 function PackList:doDrawItem(y, item, alt)
     if self.selected == item.index then
         self:drawSelection(0, y, self:getWidth(), item.height - 1)

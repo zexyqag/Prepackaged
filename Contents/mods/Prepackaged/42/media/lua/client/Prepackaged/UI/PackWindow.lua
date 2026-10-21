@@ -1,8 +1,7 @@
--- The Prepackaged window: the packs found, their details, Paste and Use this pack.
 require "ISUI/ISPanel"
-require "ISUI/ISModalDialog"
 local Discovery = require "Prepackaged/Discovery"
 local Files = require "Prepackaged/Files"
+local RestoreWindow = require "Prepackaged/UI/RestoreWindow"
 local ReviewWindow = require "Prepackaged/UI/ReviewWindow"
 local Rows = require "Prepackaged/Rows"
 local Widgets = require "Prepackaged/UI/Widgets"
@@ -14,16 +13,16 @@ local BUTTON_HGT = FONT_HGT_SMALL + 6
 
 local PackWindow = ISPanel:derive("PrepackagedPackWindow")
 
--- A share of the screen, at least the minimum unless the screen is smaller.
 local function size(total, fraction, minimum)
     return math.floor(math.min(total - UI_BORDER_SPACING * 2, math.max(minimum, total * fraction)))
 end
 
-function PackWindow:new(x, y, width, height)
+function PackWindow:new(x, y, width, height, onClose)
     local o = ISPanel.new(self, x, y, width, height)
     o.backgroundColor = { r = 0, g = 0, b = 0, a = 0.9 }
     o.borderColor = { r = 1, g = 1, b = 1, a = 0.2 }
     o.status = ""
+    o.onClose = onClose
     return o
 end
 
@@ -46,6 +45,7 @@ function PackWindow:createChildren()
     self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_btn_back") }, self.onBack)
     self.backButton:enableCancelColor()
     self.pasteButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Paste") }, self.onPaste)
+    self.restoreButton = Widgets.button(self, self.pasteButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Restore") }, self.onRestore)
     self.useButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Use"), getText("UI_Prepackaged_Update") }, self.onUse)
     self.useButton:setX(self.width - UI_BORDER_SPACING - self.useButton.width)
     self.useButton:enableAcceptColor()
@@ -79,7 +79,6 @@ function PackWindow:statusText(current)
     return getText("UI_Prepackaged_Current", Rows.name(current.result.pack), state.applied)
 end
 
--- Finds the packs again; selects `wanted`, else the pack in use, else the first.
 function PackWindow:refresh(wanted)
     self.state = Files.loadState()
     local entries = Discovery.all()
@@ -128,11 +127,7 @@ end
 function PackWindow:onPaste()
     local entry = Discovery.fromClipboard()
     if entry == nil then
-        local w, h = 350, 120
-        local modal = ISModalDialog:new((getCore():getScreenWidth() - w) / 2, (getCore():getScreenHeight() - h) / 2, w, h, getText("UI_Prepackaged_ClipboardEmpty"), false)
-        modal:initialise()
-        modal:addToUIManager()
-        modal:bringToTop()
+        Widgets.tell({ getText("UI_Prepackaged_ClipboardEmpty"), getText("UI_Prepackaged_ClipboardHow") })
         return
     end
     self.pasted = entry
@@ -141,11 +136,12 @@ end
 
 function PackWindow:onUse()
     self:setVisible(false)
-    ReviewWindow.open(self, self.entry, self.state)
+    self.review = ReviewWindow.open(self, self.entry, self.state)
 end
 
--- Called by the review window when it closes without reloading Lua. A pasted pack that was applied is a file now.
+-- A pasted pack that was applied is a file now.
 function PackWindow:onReviewClosed(applied)
+    self.review = nil
     self:setVisible(true)
     if applied then
         self.pasted = nil
@@ -155,20 +151,39 @@ function PackWindow:onReviewClosed(applied)
     end
 end
 
+function PackWindow:onRestore()
+    self:setVisible(false)
+    RestoreWindow.open(self, self.state)
+end
+
+function PackWindow:onRestoreClosed()
+    self:setVisible(true)
+    self:refresh(self.entry)
+end
+
+-- The game has looked at the mod folders again (ZomboidFileSystem.java:1302-1319): mods may be installed or gone.
+function PackWindow:onModsModified()
+    if self.review ~= nil then
+        self.review:update()
+    end
+    self:refresh(self.entry)
+end
+
 function PackWindow:onBack()
     self:setVisible(false)
     self:removeFromUIManager()
     PackWindow.instance = nil
     MainScreen.instance.bottomPanel:setVisible(true)
+    self.onClose()
 end
 
-function PackWindow.open()
+function PackWindow.open(onClose)
     if PackWindow.instance ~= nil then
         return
     end
     local screenW, screenH = getCore():getScreenWidth(), getCore():getScreenHeight()
     local width, height = size(screenW, 0.6, 800), size(screenH, 0.7, 500)
-    local window = PackWindow:new((screenW - width) / 2, (screenH - height) / 2, width, height)
+    local window = PackWindow:new((screenW - width) / 2, (screenH - height) / 2, width, height, onClose)
     window:initialise()
     window:addToUIManager()
     PackWindow.instance = window

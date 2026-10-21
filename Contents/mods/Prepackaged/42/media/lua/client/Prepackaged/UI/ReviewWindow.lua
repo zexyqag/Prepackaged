@@ -1,6 +1,6 @@
--- The review of a pack's mod list before anything changes: optional mods to tick, Save as my preset, Apply.
 require "ISUI/ISPanel"
 require "ISUI/ISTextBox"
+local Discovery = require "Prepackaged/Discovery"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local ModList = require "Prepackaged/ModList"
@@ -38,6 +38,7 @@ function ReviewWindow:createChildren()
     self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_btn_back") }, self.onBack)
     self.backButton:enableCancelColor()
     self.presetButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_SavePreset") }, self.onPreset)
+    self.collectionButton = Widgets.button(self, self.presetButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_OpenCollection") }, self.onCollection)
     self.applyButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Apply") }, self.onApply)
     self.applyButton:setX(self.width - UI_BORDER_SPACING - self.applyButton.width)
     self.applyButton:enableAcceptColor()
@@ -50,11 +51,12 @@ function ReviewWindow:prerender()
     self:drawText(self.notice, UI_BORDER_SPACING, UI_BORDER_SPACING + FONT_HGT_LARGE + UI_BORDER_SPACING / 2, 0.8, 0.8, 0.8, 1, UIFont.Small)
 end
 
+-- Also when mods are subscribed or updated, so Apply never uses a plan made before.
 function ReviewWindow:update()
     local pack = self.entry.result.pack
     self.plan = Enable.plan(self.entry, self.state, self.ticks)
-    local names = { pack = Rows.name(pack), preset = Enable.backupName(pack), of = Enable.nameOf }
-    self.list:setRows(Rows.review(self.plan, pack, self.state, names))
+    self.list:setRows(Rows.review(self.plan, pack, self.state, { pack = Rows.name(pack), of = Enable.nameOf }))
+    self.collectionButton:setVisible(#self.plan.missing > 0 and #pack.collection > 0 and isSteamOverlayEnabled())
 end
 
 function ReviewWindow:onTick(row)
@@ -84,8 +86,15 @@ function ReviewWindow:onPresetName(button)
         return
     end
     local name = button.parent.entry:getText()
-    Files.savePreset(name, self.plan.mods)
-    self.notice = getText("UI_Prepackaged_PresetSaved", name)
+    if Files.savePreset(name, self.plan.mods) then
+        self.notice = getText("UI_Prepackaged_PresetSaved", name)
+    else
+        self.notice = getText("UI_Prepackaged_PresetFailed", Files.PRESET_COPY)
+    end
+end
+
+function ReviewWindow:onCollection()
+    activateSteamOverlayToWorkshopItem(self.entry.result.pack.collection[1])
 end
 
 function ReviewWindow:close(applied)
@@ -98,9 +107,41 @@ function ReviewWindow:onBack()
     self:close(false)
 end
 
+local function version(entry)
+    return entry.result.pack.version or getText("UI_Prepackaged_NoVersion")
+end
+
 function ReviewWindow:onApply()
-    if not Enable.apply(self.entry, self.plan, self.state) then
-        self:close(true)
+    local left = #self.plan.missing + #self.plan.unavailable
+    if left > 0 then
+        local lines = { getText("UI_Prepackaged_AskIncomplete", left, #self.entry.result.pack.mods), getText("UI_Prepackaged_AskApplyAnyway") }
+        Widgets.ask(lines, self, self.checkReplace)
+    else
+        self:checkReplace()
+    end
+end
+
+function ReviewWindow:checkReplace()
+    local replaced = self.entry.source == "clipboard" and Discovery.replaced(self.entry)
+    if replaced then
+        local lines = {
+            getText("UI_Prepackaged_AskReplace", Files.PACKS .. "/" .. replaced.name),
+            getText("UI_Prepackaged_AskReplaceVersions", version(replaced), version(self.entry)),
+        }
+        Widgets.ask(lines, self, self.commit)
+    else
+        self:commit()
+    end
+end
+
+function ReviewWindow:commit()
+    local result = Enable.apply(self.entry, self.plan, self.state)
+    if result.reloaded then
+        return
+    end
+    self:close(result.error == nil)
+    if result.error ~= nil then
+        Widgets.tell({ getText(result.error, unpack(result.args)) })
     end
 end
 
@@ -108,6 +149,7 @@ function ReviewWindow.open(owner, entry, state)
     local window = ReviewWindow:new(owner.x, owner.y, owner.width, owner.height, owner, entry, state)
     window:initialise()
     window:addToUIManager()
+    return window
 end
 
 return ReviewWindow

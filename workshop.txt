@@ -9,10 +9,15 @@ description=
 description=Prepackaged turns a mod pack into a guided setup. A pack is a small Workshop item with one text file that lists the pack's mods. Prepackaged finds it and enables those mods in the pack's load order, after showing you exactly what changes.
 description=
 description=[h2]USE A PACK[/h2]
-description=Subscribe to Prepackaged and the pack, then press Prepackaged in the bottom right corner of the main menu. Pick the pack, tick the optional mods you want and check the changes. Your old mod list is saved as a Mods screen preset first.
+description=[list]
+description=[*]Subscribe to Prepackaged, the pack and the pack's mods. The pack's collection usually holds them all.
+description=[*]Enable Prepackaged in the Mods screen.
+description=[*]Press Prepackaged in the bottom right corner of the main menu. Pick the pack, tick the optional mods you want and check the changes.
+description=[/list]
+description=Your mod list is backed up first, in its exact load order. Restore in the Prepackaged window brings it back.
 description=
 description=[h2]KEEP YOUR OWN MODS[/h2]
-description=Add your own mods, such as maps, on top of the pack. When the pack updates, only the pack's own mods change; yours stay. Save the result as your own preset with one click.
+description=Add your own mods, such as maps, on top of the pack. When the pack updates, only the pack's own mods change; yours stay. Save as my preset also keeps the list as a Mods screen preset, which holds the mods but not their order.
 description=
 description=[h2]MAKE A PACK[/h2]
 description=A pack is a mod that holds a prepackaged.txt file. The format is described on [url=https://github.com/zexyqag/prepackaged]GitHub[/url].

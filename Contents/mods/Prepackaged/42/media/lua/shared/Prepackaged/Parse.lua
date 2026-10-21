@@ -1,14 +1,24 @@
--- Reads a pack file (prepackaged.txt). Pure: no game calls.
 -- Character classes are spelled out because Kahlua's %a, %d and %w also match non-ASCII letters and digits.
+local Text = require "Prepackaged/Text"
+
 local Parse = {}
 
 Parse.FILE = "prepackaged.txt"
+Parse.MOD_ID = "Prepackaged"
+-- Generous for real packs (a few hundred lines and a few KB), small enough that a hostile file is read in a second or
+-- two in Kahlua. A line holds a whole Mods or WorkshopItems list, so it may be long.
+Parse.MAX_LINES = 20000
+Parse.MAX_SIZE = 1000000
+Parse.MAX_LINE = 100000
+-- Nobody reads more, and each note becomes a row in the window.
+Parse.MAX_NOTES = 100
 
-local MOD_ID = "Prepackaged"
+local trim, split = Text.trim, Text.split
 local MOC_ID = "ModOptionsControl"
 local ID_MAX = 48
 local WHOLE_DIGITS = 9
-local WORKSHOP_DIGITS = 20
+-- PublishedFileId_t is a uint64.
+local WORKSHOP_MAX = "18446744073709551615"
 -- Java's UTF-8 reader keeps a byte order mark as this one character at the start of the first line.
 local BOM = 65279
 local NEEDS = { ZombieBuddy = true }
@@ -16,25 +26,6 @@ local BOOLEANS = { ["true"] = true, ["false"] = false }
 local SANDBOX_NAME = "^[A-Za-z_][A-Za-z0-9_]*$"
 local SANDBOX_TABLE_NAME = "^[A-Za-z_][A-Za-z0-9_]*%.[A-Za-z_][A-Za-z0-9_]*$"
 
-local function trim(text)
-    return string.match(text, "^[ \t]*(.-)[ \t]*$")
-end
-
--- separator is one character.
-local function split(text, separator)
-    local parts, from = {}, 1
-    while true do
-        local i = string.find(text, separator, from, true)
-        if i == nil then
-            parts[#parts + 1] = string.sub(text, from)
-            return parts
-        end
-        parts[#parts + 1] = string.sub(text, from, i - 1)
-        from = i + 1
-    end
-end
-
--- Splits at the first separator, both sides trimmed; nil without one.
 local function splitAt(text, separator)
     local i = string.find(text, separator, 1, true)
     if i == nil then
@@ -47,12 +38,23 @@ local function isWhole(text)
     return string.match(text, "^[0-9]+$") ~= nil
 end
 
+-- With the exponent Kahlua's tostring writes below 0.001 and from 10^7 (Java's Double.toString).
 local function isNumber(text)
+    local e = string.find(text, "[eE]")
+    if e ~= nil then
+        if string.match(string.sub(text, e + 1), "^[+-]?[0-9]+$") == nil then
+            return false
+        end
+        text = string.sub(text, 1, e - 1)
+    end
     return string.match(text, "^%-?[0-9]+$") ~= nil or string.match(text, "^%-?[0-9]*%.[0-9]+$") ~= nil
 end
 
 local function isWorkshopId(text)
-    return #text <= WORKSHOP_DIGITS and string.match(text, "^[1-9][0-9]*$") ~= nil
+    if string.match(text, "^[1-9][0-9]*$") == nil then
+        return false
+    end
+    return #text < #WORKSHOP_MAX or (#text == #WORKSHOP_MAX and text <= WORKSHOP_MAX)
 end
 
 local function isKeyCode(text)
@@ -76,36 +78,46 @@ local function words(text)
     return list
 end
 
-local function add(list, line, code, ...)
-    list[#list + 1] = { line = line, code = code, args = { ... } }
-end
-
-local function warn(ctx, line, code, ...)
-    add(ctx.warnings, line, code, ...)
-end
-
-local function fail(ctx, line, code, ...)
-    add(ctx.errors, line, code, ...)
-end
-
--- Stable, so notes on one line keep the order they were found in.
-local function byLine(list)
-    for i = 2, #list do
-        local item, j = list[i], i - 1
-        while j >= 1 and list[j].line > item.line do
-            list[j + 1] = list[j]
-            j = j - 1
-        end
-        list[j + 1] = item
+local function add(ctx, kind, line, code, ...)
+    local list = ctx[kind]
+    if #list < Parse.MAX_NOTES then
+        list[#list + 1] = { line = line, code = code, args = { ... } }
+    else
+        ctx.more[kind] = ctx.more[kind] + 1
     end
 end
 
--- Splits a ;-list into list, skipping empty entries and noting bad and repeated ones. at maps entry to line.
+local function warn(ctx, line, code, ...)
+    add(ctx, "warnings", line, code, ...)
+end
+
+local function fail(ctx, line, code, ...)
+    add(ctx, "errors", line, code, ...)
+end
+
+-- Linear, and stable so notes on one line keep the order they were found in.
+local function byLine(list)
+    local buckets, last = {}, 0
+    for _, note in ipairs(list) do
+        local bucket = buckets[note.line]
+        if bucket == nil then
+            bucket = {}
+            buckets[note.line] = bucket
+        end
+        bucket[#bucket + 1] = note
+        last = math.max(last, note.line)
+    end
+    local i = 0
+    for line = 0, last do
+        for _, note in ipairs(buckets[line] or {}) do
+            i = i + 1
+            list[i] = note
+        end
+    end
+end
+
 local function addEach(ctx, n, value, list, at, check, code)
     for _, item in ipairs(split(value, ";")) do
-        if check == nil then
-            item = string.gsub(item, "\\", "")
-        end
         item = trim(item)
         if item ~= "" then
             if check ~= nil and not check(item) then
@@ -153,16 +165,20 @@ local PACK = {
     workshopitems = function(ctx, n, value)
         addEach(ctx, n, value, ctx.pack.workshopItems, ctx.lines.workshopItems, isWorkshopId, "BadWorkshopId")
     end,
+    -- The server and the mods file drop every \ (GameServer.java:641-649, ActiveModsFile.java:108).
     mods = function(ctx, n, value)
-        addEach(ctx, n, value, ctx.pack.mods, ctx.lines.mods)
+        addEach(ctx, n, (string.gsub(value, "\\", "")), ctx.pack.mods, ctx.lines.mods)
     end,
     map = function(ctx, n, value)
         if value ~= "" then
             ctx.pack.map = value
         end
     end,
+    maporder = function(ctx, n, value)
+        addEach(ctx, n, value, ctx.pack.mapOrder, ctx.lines.mapOrder)
+    end,
     needs = function(ctx, n, value)
-        addEach(ctx, n, value, ctx.pack.needs, {}, function(item) return NEEDS[item] ~= nil end, "UnknownNeed")
+        addEach(ctx, n, value, ctx.pack.needs, ctx.lines.needs, function(item) return NEEDS[item] ~= nil end, "UnknownNeed")
     end,
     heap = function(ctx, n, value)
         ctx.pack.heap = positive(ctx, n, "heap", value)
@@ -171,7 +187,6 @@ local PACK = {
         ctx.pack.hostmemory = positive(ctx, n, "hostmemory", value)
     end,
 }
--- Keys that take one value; the list keys may repeat, and their lines add up.
 local SINGLE = { id = true, name = true, version = true, map = true, heap = true, hostmemory = true }
 
 local function packLine(ctx, n, line)
@@ -219,6 +234,7 @@ local function collectionLine(ctx, n, line)
     if not isWorkshopId(id) then
         return warn(ctx, n, "BadWorkshopId", id)
     end
+    -- Titles may hold |, so the last one ends the title.
     local bar = nil
     local from = 1
     while true do
@@ -240,13 +256,11 @@ local function collectionLine(ctx, n, line)
         item = trim(item)
         local child = string.match(item, "^c:(.*)$")
         local target = trim(child or item)
-        if item == "" then
-            -- empty entries, such as a trailing ;, are skipped
-        elseif not isWorkshopId(target) then
+        if item ~= "" and not isWorkshopId(target) then
             warn(ctx, n, "BadWorkshopId", item)
-        elseif seen[target] then
+        elseif item ~= "" and seen[target] then
             warn(ctx, n, "Duplicate", target)
-        else
+        elseif item ~= "" then
             seen[target] = true
             local list = child and entry.children or entry.items
             list[#list + 1] = target
@@ -302,7 +316,6 @@ local function keyLine(ctx, n, line)
     list[#list + 1] = bind
 end
 
--- Typed value and its text as written back, by ModOptions type; nil when the text doesn't fit the type.
 local VALUES = {
     tickbox = function(text)
         if BOOLEANS[text] ~= nil then
@@ -355,8 +368,9 @@ local VALUES = {
     end,
 }
 
-local function modOptionLine(ctx, n, line)
-    local fields = split(line, "|")
+-- raw is the line before trimming: the game keeps a textentry value exactly (ModOptions.lua:304-307).
+local function modOptionLine(ctx, n, line, raw)
+    local fields = split(raw, "|")
     if #fields < 4 then
         return warn(ctx, n, "BadLine")
     end
@@ -409,21 +423,19 @@ local function sandboxLine(ctx, n, line)
     list[#list + 1] = { name = name, value = value, line = n }
 end
 
--- One Page or Page.option per line; Mod Options Control's own lists split on ; , and spaces.
+-- The rules file takes any page and option id (MOC_Shared.lua:64-89), so only the first . splits.
 local function lockLine(ctx, n, line)
-    if string.find(line, "[;, \t]") then
-        return warn(ctx, n, "BadLock", line)
-    end
     local dot = string.find(line, ".", 1, true)
-    local page = dot and string.sub(line, 1, dot - 1) or line
-    local option = dot and string.sub(line, dot + 1) or nil
+    local page = dot and trim(string.sub(line, 1, dot - 1)) or line
+    local option = dot and trim(string.sub(line, dot + 1)) or nil
     if page == "" or option == "" then
         return warn(ctx, n, "BadLock", line)
     end
-    if ctx.seen.locks[line] then
-        return warn(ctx, n, "Duplicate", line)
+    local key = option and (page .. "." .. option) or page
+    if ctx.seen.locks[key] then
+        return warn(ctx, n, "Duplicate", key)
     end
-    ctx.seen.locks[line] = true
+    ctx.seen.locks[key] = true
     local list = ctx.pack.locks
     list[#list + 1] = { page = page, option = option, line = n }
 end
@@ -438,27 +450,30 @@ local SECTIONS = {
     locks = lockLine,
 }
 
--- Reports each collection reached again while it is still being walked, at the line that refers back to it.
+-- Iterative: Kahlua's call stack ends at about 100 frames.
 local function cycles(ctx)
-    local byId = ctx.seen.collections
-    local state = {}
-    local function walk(entry)
-        state[entry.id] = "open"
-        for _, child in ipairs(entry.children) do
-            local target = byId[child]
-            if target ~= nil then
-                if state[child] == "open" then
-                    warn(ctx, entry.line, "CollectionCycle", entry.id, child)
-                elseif state[child] == nil then
-                    walk(target)
+    local byId, state = ctx.seen.collections, {}
+    for _, root in ipairs(ctx.pack.collections) do
+        if state[root.id] == nil then
+            state[root.id] = "open"
+            local stack = { { entry = root, next = 1 } }
+            while #stack > 0 do
+                local frame = stack[#stack]
+                local child = frame.entry.children[frame.next]
+                if child == nil then
+                    state[frame.entry.id] = "done"
+                    stack[#stack] = nil
+                else
+                    frame.next = frame.next + 1
+                    local target = byId[child]
+                    if target ~= nil and state[child] == "open" then
+                        warn(ctx, frame.entry.line, "CollectionCycle", frame.entry.id, child)
+                    elseif target ~= nil and state[child] == nil then
+                        state[child] = "open"
+                        stack[#stack + 1] = { entry = target, next = 1 }
+                    end
                 end
             end
-        end
-        state[entry.id] = "done"
-    end
-    for _, entry in ipairs(ctx.pack.collections) do
-        if state[entry.id] == nil then
-            walk(entry)
         end
     end
 end
@@ -477,8 +492,8 @@ local function finish(ctx, sourceMod)
     if #pack.mods == 0 then
         fail(ctx, keys.mods or 0, "MissingKey", "Mods")
     else
-        if ctx.lines.mods[MOD_ID] == nil then
-            fail(ctx, keys.mods, "MissingMod", MOD_ID)
+        if ctx.lines.mods[Parse.MOD_ID] == nil then
+            fail(ctx, keys.mods, "MissingMod", Parse.MOD_ID)
         end
         if sourceMod ~= nil and ctx.lines.mods[sourceMod] == nil then
             fail(ctx, keys.mods, "MissingMod", sourceMod)
@@ -512,60 +527,99 @@ local function finish(ctx, sourceMod)
     if #pack.locks > 0 and ctx.lines.mods[MOC_ID] == nil then
         warn(ctx, pack.locks[1].line, "LocksWithoutMOC", MOC_ID)
     end
-    byLine(ctx.errors)
-    byLine(ctx.warnings)
 end
 
--- Splits pasted text into lines as a file reader would: CRLF and LF end a line, and a last one ends the text.
-function Parse.lines(text)
-    local lines = split(text, "\n")
-    if lines[#lines] == "" then
-        lines[#lines] = nil
-    end
-    for i, line in ipairs(lines) do
-        lines[i] = string.gsub(line, "\r$", "")
-    end
-    return lines
-end
-
--- sourceMod: the mod the file came from, which the pack's Mods must then include.
--- Returns { pack, errors, warnings, lines }; each note is { line, code, args }, line 0 for the whole file.
--- lines holds the first line of each @pack key and of each mod, Workshop item and top collection.
-function Parse.read(lines, sourceMod)
-    local ctx = {
+local function newContext()
+    return {
         pack = {
-            collection = {}, workshopItems = {}, mods = {}, needs = {},
+            collection = {}, workshopItems = {}, mods = {}, mapOrder = {}, needs = {},
             optional = {}, collections = {}, keys = {}, modoptions = {}, sandbox = {}, locks = {},
         },
         errors = {},
         warnings = {},
-        lines = { pack = {}, mods = {}, workshopItems = {}, collection = {} },
+        more = { errors = 0, warnings = 0 },
+        lines = { pack = {}, mods = {}, workshopItems = {}, collection = {}, mapOrder = {}, needs = {} },
         seen = { optional = {}, collections = {}, keys = {}, modoptions = {}, sandbox = {}, locks = {} },
     }
+end
+
+local function result(ctx)
+    byLine(ctx.errors)
+    byLine(ctx.warnings)
+    return { pack = ctx.pack, errors = ctx.errors, warnings = ctx.warnings, more = ctx.more }
+end
+
+-- Stops one line past a cap, so read still sees that the file is too big.
+function Parse.collect(nextLine)
+    local lines, size = {}, 0
+    local line = nextLine()
+    while line ~= nil do
+        lines[#lines + 1] = line
+        size = size + #line
+        if #lines > Parse.MAX_LINES or size > Parse.MAX_SIZE then
+            return lines
+        end
+        line = nextLine()
+    end
+    return lines
+end
+
+-- As BufferedReader.readLine splits a file: CRLF, LF and CR end a line.
+function Parse.lines(text)
+    local from = 1
+    return Parse.collect(function()
+        if from > #text then
+            return nil
+        end
+        local i = string.find(text, "[\r\n]", from)
+        local stop = (i or #text + 1) - 1
+        local line = string.sub(text, from, math.min(stop, from + Parse.MAX_SIZE))
+        from = (i ~= nil and string.sub(text, i, i + 1) == "\r\n") and i + 2 or stop + 2
+        return line
+    end)
+end
+
+function Parse.failed(message)
+    local ctx = newContext()
+    fail(ctx, 0, "Unreadable", string.sub(tostring(message), 1, 200))
+    return result(ctx)
+end
+
+function Parse.read(lines, sourceMod)
+    local ctx = newContext()
+    local size = 0
+    for _, line in ipairs(lines) do
+        size = size + #line
+    end
+    if #lines > Parse.MAX_LINES or size > Parse.MAX_SIZE then
+        fail(ctx, 0, "TooBig", Parse.MAX_LINES, Parse.MAX_SIZE)
+        return result(ctx)
+    end
     local section = nil
     for n, raw in ipairs(lines) do
-        local line = raw
-        if n == 1 and string.byte(line, 1) == BOM then
-            line = string.sub(line, 2)
-        end
-        line = trim(line)
-        local first = string.sub(line, 1, 1)
-        if line == "" or first == "#" then
-            -- blank lines and comments
-        elseif first == "@" then
-            local name = string.lower(trim(string.sub(line, 2)))
-            section = SECTIONS[name] or false
-            if not section then
-                warn(ctx, n, "UnknownSection", line)
+        if #raw > Parse.MAX_LINE then
+            fail(ctx, n, "LineTooLong", Parse.MAX_LINE)
+        else
+            if n == 1 and string.byte(raw, 1) == BOM then
+                raw = string.sub(raw, 2)
             end
-        elseif section == nil then
-            warn(ctx, n, "OutsideSection")
-        elseif section then
-            section(ctx, n, line)
+            local line = trim(raw)
+            local first = string.sub(line, 1, 1)
+            if first == "@" then
+                local name = string.lower(trim(string.sub(line, 2)))
+                section = SECTIONS[name] or false
+                if not section then
+                    warn(ctx, n, "UnknownSection", line)
+                end
+            elseif line ~= "" and first ~= "#" and section == nil then
+                warn(ctx, n, "OutsideSection")
+            elseif line ~= "" and first ~= "#" and section then
+                section(ctx, n, line, raw)
+            end
         end
     end
     finish(ctx, sourceMod)
-    return { pack = ctx.pack, errors = ctx.errors, warnings = ctx.warnings, lines = ctx.lines }
+    return result(ctx)
 end
 
 return Parse

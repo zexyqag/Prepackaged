@@ -1,34 +1,45 @@
--- Finds pack files: in every installed mod, enabled or not, in Zomboid/Lua/Prepackaged/packs and on the clipboard.
--- An entry is { source = "mod" | "file" | "clipboard", name = mod id or file name, lines, result = Parse.read },
--- plus modName and enabled for a mod.
 local Files = require "Prepackaged/Files"
 local Parse = require "Prepackaged/Parse"
+local Text = require "Prepackaged/Text"
 
 local Discovery = {}
 
-local function modEntry(info, lines)
+-- One bad file is shown as a broken pack: nothing it does may break the window or the main menu.
+local function load(entry, read, sourceMod)
+    local ok, lines = pcall(read)
+    if ok and lines == nil then
+        return nil
+    end
+    local result = lines
+    if ok then
+        ok, result = pcall(Parse.read, lines, sourceMod)
+    end
+    if not ok then
+        print("[Prepackaged] WARNING: a pack file could not be read: " .. tostring(result))
+        lines, result = {}, Parse.failed(result)
+    end
+    entry.lines, entry.result = lines, result
+    return entry
+end
+
+local function modEntry(info)
     local id = info:getId()
-    return {
-        source = "mod", name = id, modName = info:getName(), enabled = isModActive(info),
-        lines = lines, result = Parse.read(lines, id),
-    }
+    local entry = { source = "mod", name = id, modName = info:getName(), enabled = isModActive(info) }
+    return load(entry, function() return Files.readModPack(id) end, id)
 end
 
-local function fileEntry(name, lines)
-    return { source = "file", name = name, lines = lines, result = Parse.read(lines) }
+local function fileEntry(name)
+    return load({ source = "file", name = name }, function() return Files.readPack(Files.PACKS .. "/" .. name) end)
 end
 
--- Mods in id order, as the Mods screen reads them: the first folder of an id counts.
+-- The first folder of an id counts, as for getModFileReader (LuaManager.java:4333-4337).
 function Discovery.fromMods()
     local list, seen = {}, {}
     for _, dir in ipairs(getModDirectoryTable()) do
         local info = getModInfo(dir)
         if info ~= nil and not seen[info:getId()] then
             seen[info:getId()] = true
-            local lines = Files.readMod(info:getId(), Parse.FILE)
-            if lines ~= nil then
-                list[#list + 1] = modEntry(info, lines)
-            end
+            list[#list + 1] = modEntry(info)
         end
     end
     table.sort(list, function(a, b) return a.name < b.name end)
@@ -39,10 +50,7 @@ function Discovery.fromFiles()
     local list = {}
     for _, name in ipairs(Files.list(Files.PACKS)) do
         if string.match(string.lower(name), "%.txt$") then
-            local lines = Files.read(Files.PACKS .. "/" .. name)
-            if lines ~= nil then
-                list[#list + 1] = fileEntry(name, lines)
-            end
+            list[#list + 1] = fileEntry(name)
         end
     end
     return list
@@ -56,24 +64,35 @@ function Discovery.all()
     return list
 end
 
--- nil when the clipboard holds no text.
 function Discovery.fromClipboard()
     local text = Clipboard.getClipboard()
-    if text == nil or not string.find(text, "[^ \t\r\n]") then
+    if not string.find(text, "[^ \t\r\n]") then
         return nil
     end
-    local lines = Parse.lines(text)
-    return { source = "clipboard", lines = lines, result = Parse.read(lines) }
+    return load({ source = "clipboard" }, function() return Parse.lines(text) end)
 end
 
--- Saves a pasted pack as Prepackaged/packs/<id>.txt, so Lua reloads find it again, and returns it as a file entry.
+local function packFile(entry)
+    return entry.result.pack.id .. ".txt"
+end
+
+function Discovery.replaced(entry)
+    local existing = fileEntry(packFile(entry))
+    if existing ~= nil and not Text.same(existing.lines, entry.lines) then
+        return existing
+    end
+    return nil
+end
+
+-- Saved so that Lua reloads find it again.
 function Discovery.keep(entry)
-    local name = entry.result.pack.id .. ".txt"
-    Files.write(Files.PACKS .. "/" .. name, entry.lines)
-    return fileEntry(name, entry.lines)
+    local name = packFile(entry)
+    if not Files.write(Files.PACKS .. "/" .. name, entry.lines) then
+        return nil
+    end
+    return { source = "file", name = name, lines = entry.lines, result = entry.result }
 end
 
--- The pack in use, read again from where it was found; nil if it is gone or no longer has the same id.
 function Discovery.current(state)
     local source = state.source
     if state.current == nil or source == nil then
@@ -82,11 +101,9 @@ function Discovery.current(state)
     local entry = nil
     if source.kind == "mod" then
         local info = getModInfoByID(source.name)
-        local lines = info and Files.readMod(source.name, Parse.FILE)
-        entry = lines and modEntry(info, lines)
+        entry = info and modEntry(info)
     else
-        local lines = Files.read(Files.PACKS .. "/" .. source.name)
-        entry = lines and fileEntry(source.name, lines)
+        entry = fileEntry(source.name)
     end
     if entry ~= nil and entry.result.pack.id == state.current then
         return entry
@@ -94,7 +111,6 @@ function Discovery.current(state)
     return nil
 end
 
--- Whether an entry is a usable newer version of the pack in use.
 function Discovery.isUpdate(entry, state)
     local pack = entry.result.pack
     return #entry.result.errors == 0 and pack.id == state.current and state.applied ~= nil and pack.version > state.applied

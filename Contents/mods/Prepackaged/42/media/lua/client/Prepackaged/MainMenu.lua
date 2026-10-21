@@ -1,4 +1,3 @@
--- The main menu's Prepackaged button, above the buttons in the bottom right corner, shown and hidden with the menu.
 require "ISUI/ISButton"
 local Discovery = require "Prepackaged/Discovery"
 local Enable = require "Prepackaged/Enable"
@@ -10,11 +9,39 @@ local UI_BORDER_SPACING = 10
 local BUTTON_HGT = FONT_HGT_SMALL + 6
 local TITLES = { "UI_Prepackaged_Button", "UI_Prepackaged_ButtonUpdate" }
 
--- Says so when the pack in use has a newer version where it was found.
-local function title()
+local followsClass = false
+
+local function hasUpdate()
     local state = Files.loadState()
     local current = Discovery.current(state)
-    return getText(TITLES[current ~= nil and Discovery.isUpdate(current, state) and 2 or 1])
+    return current ~= nil and Discovery.isUpdate(current, state)
+end
+
+-- Worked out here and kept, so showing the menu never reads a pack file.
+local function refreshTitle()
+    local button = MainScreen.instance and MainScreen.instance.prepackagedButton
+    if button ~= nil then
+        local ok, update = pcall(hasUpdate)
+        button:setTitle(getText(TITLES[ok and update and 2 or 1]))
+    end
+end
+
+local function openWindow()
+    PackWindow.open(refreshTitle)
+end
+
+-- The button shows and hides with vanilla's corner buttons (MainScreen.setBottomPanelVisible, MainScreen.lua:28-44).
+-- Vanilla's function runs as before, and nothing of ours may raise inside it.
+local function follow(setVisible)
+    return function(panel, visible)
+        setVisible(panel, visible)
+        pcall(function()
+            local button = panel.parent and panel.parent.prepackagedButton
+            if button ~= nil then
+                button:setVisible(visible)
+            end
+        end)
+    end
 end
 
 local function addButton()
@@ -31,7 +58,7 @@ local function addButton()
     for _, key in ipairs(TITLES) do
         width = math.max(width, getTextManager():MeasureStringX(UIFont.Small, getText(key)) + UI_BORDER_SPACING * 2)
     end
-    local button = ISButton:new(below:getRight() - width, below.y - UI_BORDER_SPACING - BUTTON_HGT, width, BUTTON_HGT, title(), nil, PackWindow.open)
+    local button = ISButton:new(below:getRight() - width, below.y - UI_BORDER_SPACING - BUTTON_HGT, width, BUTTON_HGT, getText(TITLES[1]), nil, openWindow)
     button:initialise()
     button.borderColor = { r = 1, g = 1, b = 1, a = 0.7 }
     button.textColor = { r = 1, g = 1, b = 1, a = 0.7 }
@@ -39,25 +66,33 @@ local function addButton()
     button:setAnchorTop(false)
     button:setAnchorRight(true)
     button:setAnchorBottom(true)
+    -- Vanilla may hide the menu before this runs, as for +connect (MainScreen.lua:1808).
+    local panel = screen.bottomPanel
+    button:setVisible(panel:isVisible())
     screen:addChild(button)
     screen.prepackagedButton = button
-    -- MainScreen.setBottomPanelVisible shows and hides vanilla's corner buttons with the menu; this adds ours.
-    local panel = screen.bottomPanel
-    local setVisible = panel.setVisible
-    panel.setVisible = function(self, visible)
-        setVisible(self, visible)
-        if visible then
-            button:setTitle(title())
-        end
-        button:setVisible(visible)
+    -- The class function too: a mod that sets the panel's back to it keeps the button in step.
+    if not followsClass and type(MainScreen.setBottomPanelVisible) == "function" then
+        MainScreen.setBottomPanelVisible = follow(MainScreen.setBottomPanelVisible)
+        followsClass = true
     end
+    panel.setVisible = follow(panel.setVisible)
+    refreshTitle()
 end
 
 local function onResetLua(reason)
     if reason == Enable.RESET_REASON then
-        PackWindow.open()
+        openWindow()
+    end
+end
+
+local function onModsModified()
+    refreshTitle()
+    if PackWindow.instance ~= nil then
+        PackWindow.instance:onModsModified()
     end
 end
 
 Events.OnMainMenuEnter.Add(addButton)
 Events.OnResetLua.Add(onResetLua)
+Events.OnModsModified.Add(onModsModified)
