@@ -29,20 +29,21 @@ local function head(backup)
     local lines = { "backup|" .. tostring(backup.n) .. "|" .. backup.date }
     local before = backup.before
     if before.kind == "pack" or before.kind == "defaults" then
-        lines[#lines + 1] = "before|" .. before.kind .. "|" .. before.id .. "|" .. tostring(before.version)
+        lines[#lines + 1] = "before|" .. before.kind .. "|" .. before.id .. "|" .. before.version
     else
         lines[#lines + 1] = "before|restore|" .. tostring(before.n)
     end
     return lines
 end
 
--- The backup and before lines, or false when the line is neither.
+-- The backup and before lines, or false when the line is neither. The version is only shown, so any written one is
+-- read: a backup that no longer reads would give its number, even first.txt's, to the next backup.
 local function readHead(backup, line, f, packKind)
     local kind = f[1]
     if kind == "backup" and #f >= 3 and isCount(f[2]) then
         backup.n, backup.date = tonumber(f[2]), Text.after(line, 2)
-    elseif kind == "before" and f[2] == packKind and #f == 4 and isCount(f[4]) then
-        backup.before = { kind = packKind, id = f[3], version = tonumber(f[4]) }
+    elseif kind == "before" and f[2] == packKind and #f == 4 and f[4] ~= "" then
+        backup.before = { kind = packKind, id = f[3], version = f[4] }
     elseif kind == "before" and f[2] == "restore" and #f == 3 and isCount(f[3]) then
         backup.before = { kind = "restore", n = tonumber(f[3]) }
     else

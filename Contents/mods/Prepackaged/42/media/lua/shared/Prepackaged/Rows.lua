@@ -1,5 +1,6 @@
 -- Text from a pack is only ever an argument or a row's literal text, never a format.
 local Parse = require "Prepackaged/Parse"
+local Version = require "Prepackaged/Version"
 
 local Rows = {}
 
@@ -44,9 +45,11 @@ end
 function Rows.use(pack, state)
     if pack.id == nil or pack.id ~= state.current or state.applied == nil or pack.version == nil then
         return nil
-    elseif pack.version > state.applied then
+    end
+    local order = Version.compare(pack.version, state.applied)
+    if order > 0 then
         return { key = "UI_Prepackaged_UseNewer", args = { pack.version, state.applied } }
-    elseif pack.version < state.applied then
+    elseif order < 0 then
         return { key = "UI_Prepackaged_UseOlder", args = { pack.version, state.applied } }
     end
     return { key = "UI_Prepackaged_UseSame", args = { pack.version } }
@@ -160,13 +163,18 @@ end
 
 local function title(rows, plan, pack, state, name)
     if not plan.update or state.applied == nil then
-        text(rows, "title", "UI_Prepackaged_ReviewUse", name, pack.version)
-    elseif pack.version > state.applied then
+        return text(rows, "title", "UI_Prepackaged_ReviewUse", name, pack.version)
+    end
+    local order = Version.compare(pack.version, state.applied)
+    if order > 0 then
         text(rows, "title", "UI_Prepackaged_ReviewUpdate", name, state.applied, pack.version)
-    elseif pack.version < state.applied then
+    elseif order < 0 then
         text(rows, "title", "UI_Prepackaged_ReviewDowngrade", name, state.applied, pack.version)
     else
         text(rows, "title", "UI_Prepackaged_ReviewAgain", name, pack.version)
+    end
+    if Version.compare(pack.version, state.applied, 1) > 0 then
+        text(rows, "alert", "UI_Prepackaged_ReviewMajor")
     end
 end
 
@@ -196,7 +204,12 @@ function Rows.review(plan, pack, state, names)
         end
     end
     section("UI_Prepackaged_ReviewAdded", plan.added)
-    section("UI_Prepackaged_ReviewRemoved", plan.removed)
+    -- Every mod an update disables came from the pack: the player's own are kept.
+    if #plan.removed > 0 then
+        text(rows, "section", plan.update and "UI_Prepackaged_ReviewUpdateRemoved" or "UI_Prepackaged_ReviewRemoved", #plan.removed)
+        text(rows, "alert", "UI_Prepackaged_ReviewRemovedWorlds")
+        mods(rows, plan.removed, names.of)
+    end
     section("UI_Prepackaged_ReviewExtras", plan.extras)
     section("UI_Prepackaged_ReviewMissing", plan.missing)
     section("UI_Prepackaged_ReviewUnavailable", plan.unavailable)
@@ -340,6 +353,8 @@ function Rows.backup(backup, of)
     local pack = backup.pack
     if pack.current ~= nil and pack.applied ~= nil then
         text(rows, "note", "UI_Prepackaged_RestorePack", pack.current, pack.applied)
+    elseif pack.current ~= nil then
+        text(rows, "note", "UI_Prepackaged_RestorePackUnknown", pack.current)
     else
         text(rows, "note", "UI_Prepackaged_RestoreNoPack")
     end

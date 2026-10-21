@@ -1,6 +1,7 @@
 local Files = require "Prepackaged/Files"
 local Parse = require "Prepackaged/Parse"
 local Text = require "Prepackaged/Text"
+local Version = require "Prepackaged/Version"
 
 local Discovery = {}
 
@@ -123,7 +124,7 @@ end
 
 function Discovery.isUpdate(entry, state)
     local pack = entry.result.pack
-    return #entry.result.errors == 0 and pack.id == state.current and state.applied ~= nil and pack.version > state.applied
+    return #entry.result.errors == 0 and pack.id == state.current and state.applied ~= nil and Version.compare(pack.version, state.applied) > 0
 end
 
 return Discovery

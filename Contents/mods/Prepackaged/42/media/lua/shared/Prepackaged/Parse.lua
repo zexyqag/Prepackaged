@@ -1,5 +1,6 @@
 -- Character classes are spelled out because Kahlua's %a, %d and %w also match non-ASCII letters and digits.
 local Text = require "Prepackaged/Text"
+local Version = require "Prepackaged/Version"
 
 local Parse = {}
 
@@ -153,10 +154,10 @@ local PACK = {
         end
     end,
     version = function(ctx, n, value)
-        if isWhole(value) and #value <= WHOLE_DIGITS and tonumber(value) >= 1 then
-            ctx.pack.version = tonumber(value)
+        if Version.valid(value) then
+            ctx.pack.version = value
         else
-            fail(ctx, n, "BadVersion", value)
+            fail(ctx, n, Version.valid(value .. ".0.0") and "WholeVersion" or "BadVersion", value)
         end
     end,
     collection = function(ctx, n, value)

@@ -112,8 +112,8 @@ local function misfit(target, value)
     end
 end
 
--- args: pack, targets (Settings.read), record(kind, key) for the ledger, resolve(KEY_ name) for a code, and all to show
--- the entries decided before too.
+-- args: pack, targets (Settings.read), record(kind, key) for the pack's ledger record, applied(kind, key) for what
+-- Prepackaged applied for any pack, resolve(KEY_ name) for a code, and all to show the entries decided before too.
 function Defaults.review(args)
     local targets, resolve = args.targets, args.resolve
     local review = { all = args.all == true, rows = {}, same = {}, waiting = {}, server = {}, invalid = {}, decided = 0, blocked = {} }
@@ -136,11 +136,12 @@ function Defaults.review(args)
             review.decided = review.decided + 1
             return
         end
-        local applied = nil
-        if record ~= nil and record.applied ~= nil then
-            applied = valueOf(item, record.applied, resolve)
+        local set = false
+        for _, text in ipairs(args.applied(item.kind, item.key)) do
+            local applied = valueOf(item, text, resolve)
+            set = set or (applied ~= nil and same(kind, target.current, applied))
         end
-        item.own = not same(kind, target.current, target.default) and not (applied ~= nil and same(kind, target.current, applied))
+        item.own = not same(kind, target.current, target.default) and not set
         item.declined = asked and record.decision == "declined"
         item.ticked = not item.own and not item.declined
         review.rows[#review.rows + 1] = item

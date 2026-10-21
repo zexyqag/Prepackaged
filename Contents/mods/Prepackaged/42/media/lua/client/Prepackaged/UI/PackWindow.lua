@@ -73,14 +73,15 @@ end
 
 function PackWindow:statusText(current)
     local state = self.state
+    local applied = state.applied or getText("UI_Prepackaged_NoVersion")
     if state.current == nil then
         return getText("UI_Prepackaged_NoCurrent")
     elseif current == nil then
-        return getText("UI_Prepackaged_CurrentGone", state.current, state.applied)
+        return getText("UI_Prepackaged_CurrentGone", state.current, applied)
     elseif Discovery.isUpdate(current, state) then
-        return getText("UI_Prepackaged_CurrentUpdate", Rows.name(current.result.pack), state.applied, current.result.pack.version)
+        return getText("UI_Prepackaged_CurrentUpdate", Rows.name(current.result.pack), applied, current.result.pack.version)
     end
-    return getText("UI_Prepackaged_Current", Rows.name(current.result.pack), state.applied)
+    return getText("UI_Prepackaged_Current", Rows.name(current.result.pack), applied)
 end
 
 local function found(window)

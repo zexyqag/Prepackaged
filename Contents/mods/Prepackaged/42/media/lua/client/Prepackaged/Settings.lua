@@ -8,6 +8,7 @@ local Rows = require "Prepackaged/Rows"
 local Shipped = require "Prepackaged/Shipped"
 local State = require "Prepackaged/State"
 local Text = require "Prepackaged/Text"
+local Version = require "Prepackaged/Version"
 
 local Settings = {}
 
@@ -238,7 +239,7 @@ function Settings.applies(entry, state)
         return false
     end
     local pack = entry.result.pack
-    return pack.id == state.current and pack.version == state.applied and #pack.keys + #pack.modoptions > 0
+    return pack.id == state.current and state.applied ~= nil and Version.compare(pack.version, state.applied) == 0 and #pack.keys + #pack.modoptions > 0
 end
 
 function Settings.review(entry, state, all)
@@ -247,6 +248,7 @@ function Settings.review(entry, state, all)
     local review = Defaults.review({
         pack = pack, targets = targets, all = all, resolve = Settings.resolve,
         record = function(kind, key) return State.decision(state, kind, pack.id, key) end,
+        applied = function(kind, key) return State.applied(state, kind, key) end,
     })
     return review, targets
 end
@@ -265,7 +267,9 @@ function Settings.check(entry)
     if #pack.keys + #pack.modoptions == 0 then
         return nil
     end
-    local review = Defaults.review({ pack = pack, targets = Settings.read(), all = true, resolve = Settings.resolve, record = function() return nil end })
+    local review = Defaults.review({
+        pack = pack, targets = Settings.read(), all = true, resolve = Settings.resolve, record = function() return nil end, applied = function() return {} end,
+    })
     return { keys = #pack.keys, options = #pack.modoptions, review = review }
 end
 
@@ -385,14 +389,44 @@ local function setOption(option, value)
     end
 end
 
+local function showBind(t)
+    if t.btn ~= nil and type(MainOptions.getKeyPrefix) == "function" then
+        t.btn:setTitle(MainOptions.getKeyPrefix(t) .. getKeyName(t.keyCode))
+    end
+end
+
+-- saveKeys adds each bind to the game's key map as it writes it, and rebind does after a failed save.
 local function setBind(target, bind)
     local k, t = target.keys, target.text
     k.key, k.altCode, k.shift, k.ctrl, k.alt = bind.key, bind.altCode, bind.shift, bind.ctrl, bind.alt
     t.keyCode, t.altCode, t.shift, t.ctrl, t.alt = bind.key, bind.altCode, bind.shift, bind.ctrl, bind.alt
-    if t.btn ~= nil and type(MainOptions.getKeyPrefix) == "function" then
-        t.btn:setTitle(MainOptions.getKeyPrefix(t) .. getKeyName(bind.key))
+    showBind(t)
+end
+
+-- The options screen's two copies of a bind, as setBind finds them.
+local function bindNow(target)
+    local k, t = target.keys, target.text
+    return {
+        keys = { key = k.key, altCode = k.altCode, shift = k.shift, ctrl = k.ctrl, alt = k.alt },
+        text = { keyCode = t.keyCode, altCode = t.altCode, shift = t.shift, ctrl = t.ctrl, alt = t.alt },
+    }
+end
+
+local function putBind(target, before)
+    local k, t, a, b = target.keys, target.text, before.keys, before.text
+    k.key, k.altCode, k.shift, k.ctrl, k.alt = a.key, a.altCode, a.shift, a.ctrl, a.alt
+    t.keyCode, t.altCode, t.shift, t.ctrl, t.alt = b.keyCode, b.altCode, b.shift, b.ctrl, b.alt
+    showBind(t)
+end
+
+-- saveKeys empties the game's key map, then adds each bind as it writes it (MainOptions.lua:3706-3743). After it
+-- stops, the binds it didn't reach are added again, as it would have.
+local function rebind()
+    for _, t in ipairs(MainOptions.keyText) do
+        if type(t) == "table" and t.value == nil then
+            pcall(function() getCore():addKeyBinding(t.txt:getName(), t.keyCode, t.altCode, t.shift or false, t.ctrl or false, t.alt or false) end)
+        end
     end
-    getCore():addKeyBinding(target.name, bind.key, bind.altCode, bind.shift, bind.ctrl, bind.alt)
 end
 
 -- PZAPI.ModOptions:save writes the lines of mods that aren't loaded without a line break (ModOptions.lua:286-288).
@@ -432,7 +466,10 @@ end
 -- saveKeys writes only the binds of mods that are loaded (MainOptions.lua:3706-3714). The lines of the others go back
 -- after them, so a mod enabled again still finds the player's binds.
 local function keepOthers(before)
-    local lines, written = Files.read(Settings.KEYS) or {}, {}
+    local lines, written = Files.read(Settings.KEYS), {}
+    if lines == nil then
+        return false
+    end
     local count = #lines
     for _, line in ipairs(lines) do
         local name = bindName(line)
@@ -446,9 +483,17 @@ local function keepOthers(before)
             lines[#lines + 1] = line
         end
     end
-    if #lines > count then
-        Files.write(Settings.KEYS, lines, "\r\n")
+    return #lines == count or Files.write(Settings.KEYS, lines, "\r\n")
+end
+
+local function saveKeys(before)
+    if not save(Settings.KEYS, before, MainOptions.saveKeys) then
+        return false
+    elseif keepOthers(before) then
+        return true
     end
+    Files.write(Settings.KEYS, before, "\r\n")
+    return false
 end
 
 local function savedBinds()
@@ -482,33 +527,53 @@ local function readsBack(item, binds, options)
     return saved ~= nil and saved.type == item.type and Defaults.same(item.type, Parse.optionValue(item.type, saved.text), item.to)
 end
 
--- Mod options first: their key binds sit in MainOptions.keyText too, which saveKeys writes into keysB42.ini.
+local function applyPages(pages)
+    for _, page in ipairs(pages) do
+        pcall(page.apply, page)
+    end
+end
+
+-- Mod options first: their key binds sit in MainOptions.keyText too, which saveKeys writes into keysB42.ini. A file
+-- that isn't saved is put back, and so are the values its rows changed in the game.
 local function write(binds, options, backup)
-    local done, touched, order = {}, {}, {}
+    local done, before, touched, order = {}, {}, {}, {}
     for _, item in ipairs(options) do
-        if pcall(setOption, item.target.game, item.to) then
-            done[#done + 1] = item
+        local game = item.target.game
+        local old = { value = valueOf(game) }
+        if pcall(setOption, game, item.to) then
+            done[#done + 1], before[item] = item, old
             local page = item.target.pageObject
             if not touched[page] then
                 touched[page], order[#order + 1] = true, page
             end
         end
     end
-    for _, page in ipairs(order) do
-        pcall(page.apply, page)
-    end
+    applyPages(order)
     for _, item in ipairs(binds) do
+        local old = bindNow(item.target)
         if pcall(setBind, item.target, item.to) then
-            done[#done + 1] = item
+            done[#done + 1], before[item] = item, old
         end
     end
-    if #binds > 0 and save(Settings.KEYS, backup.keys, MainOptions.saveKeys) then
-        keepOthers(backup.keys)
+    if #binds > 0 and not saveKeys(backup.keys) then
+        for _, item in ipairs(binds) do
+            if before[item] ~= nil then
+                putBind(item.target, before[item])
+            end
+        end
+        rebind()
     end
     if #options > 0 then
         local mo = PZAPI.ModOptions
         guard(mo.OtherOptions)
-        save(Settings.OPTIONS, backup.options, mo.save, mo)
+        if not save(Settings.OPTIONS, backup.options, mo.save, mo) then
+            for _, item in ipairs(options) do
+                if before[item] ~= nil then
+                    pcall(setOption, item.target.game, before[item].value)
+                end
+            end
+            applyPages(order)
+        end
     end
     local savedB, savedO = savedBinds(), savedOptions()
     local written, count = {}, 0
