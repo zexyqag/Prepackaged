@@ -4,10 +4,11 @@ local Workshop = {}
 
 Workshop.PAGE = "https://steamcommunity.com/sharedfiles/filedetails/?id="
 
--- One page: in the Steam overlay when it is on, else its address goes on the clipboard.
+-- One page: in the Steam overlay when it is on, else its address goes on the clipboard. The https address keeps it in the
+-- overlay; activateSteamOverlayToWorkshopItem's steam:// link also opens the desktop client and minimizes the game.
 function Workshop.open(id)
     if isSteamOverlayEnabled() then
-        activateSteamOverlayToWorkshopItem(id)
+        activateSteamOverlayToWebPage(Workshop.PAGE .. id)
         return "overlay"
     end
     Clipboard.setClipboard(Workshop.PAGE .. id)
