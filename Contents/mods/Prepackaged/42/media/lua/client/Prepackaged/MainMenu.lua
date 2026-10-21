@@ -1,28 +1,35 @@
 require "ISUI/ISButton"
+local Backup = require "Prepackaged/Backup"
 local Discovery = require "Prepackaged/Discovery"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local PackWindow = require "Prepackaged/UI/PackWindow"
+local Settings = require "Prepackaged/Settings"
 
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local UI_BORDER_SPACING = 10
 local BUTTON_HGT = FONT_HGT_SMALL + 6
-local TITLES = { "UI_Prepackaged_Button", "UI_Prepackaged_ButtonUpdate" }
+local TITLES = { "UI_Prepackaged_Button", "UI_Prepackaged_ButtonUpdate", "UI_Prepackaged_ButtonDefaults" }
 
 local followsClass = false
 
-local function hasUpdate()
+local function titleOf()
     local state = Files.loadState()
     local current = Discovery.current(state)
-    return current ~= nil and Discovery.isUpdate(current, state)
+    if current ~= nil and Discovery.isUpdate(current, state) then
+        return 2
+    elseif Settings.waiting(current, state) > 0 then
+        return 3
+    end
+    return 1
 end
 
 -- Worked out here and kept, so showing the menu never reads a pack file.
 local function refreshTitle()
     local button = MainScreen.instance and MainScreen.instance.prepackagedButton
     if button ~= nil then
-        local ok, update = pcall(hasUpdate)
-        button:setTitle(getText(TITLES[ok and update and 2 or 1]))
+        local ok, index = pcall(titleOf)
+        button:setTitle(getText(TITLES[ok and index or 1]))
     end
 end
 
@@ -80,9 +87,13 @@ local function addButton()
     refreshTitle()
 end
 
+-- The reload after using a pack is the first time its mods' options exist, so their review opens by itself, once.
 local function onResetLua(reason)
-    if reason == Enable.RESET_REASON then
+    if reason == Enable.RESET_REASON or reason == Backup.RESET_REASON then
         openWindow()
+    end
+    if reason == Enable.RESET_REASON and PackWindow.instance ~= nil then
+        PackWindow.instance:offerDefaults()
     end
 end
 

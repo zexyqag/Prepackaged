@@ -80,7 +80,7 @@ local function rowText(row)
         return row.text
     elseif row.style == "mod" then
         return modText(row.id, row.name)
-    elseif row.style == "tick" then
+    elseif row.style == "tick" and row.id ~= nil then
         local text = row.label and getText("UI_Prepackaged_ModName", row.label, row.id) or modText(row.id, row.name)
         if row.status == "missing" then
             return getText("UI_Prepackaged_TickMissing", text)
@@ -105,6 +105,8 @@ local STYLES = {
     error = { font = UIFont.Small, top = 0, indent = INDENT, r = BHC:getR(), g = BHC:getG(), b = BHC:getB() },
     warning = { font = UIFont.Small, top = 0, indent = INDENT, r = 0.9, g = 0.6, b = 0.2 },
     mod = { font = UIFont.Small, top = 0, indent = INDENT, r = 0.7, g = 0.7, b = 0.7 },
+    item = { font = UIFont.Small, top = 0, indent = INDENT, r = 0.7, g = 0.7, b = 0.7 },
+    group = { font = UIFont.Small, top = UI_BORDER_SPACING / 2, indent = INDENT / 2, r = 0.9, g = 0.9, b = 0.9 },
     tick = { font = UIFont.Small, top = 2, indent = INDENT, r = 0.9, g = 0.9, b = 0.9 },
 }
 

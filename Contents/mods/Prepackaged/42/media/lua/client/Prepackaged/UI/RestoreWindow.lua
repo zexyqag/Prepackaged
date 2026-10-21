@@ -3,6 +3,7 @@ local Backup = require "Prepackaged/Backup"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local Rows = require "Prepackaged/Rows"
+local Settings = require "Prepackaged/Settings"
 local Widgets = require "Prepackaged/UI/Widgets"
 
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -52,7 +53,7 @@ function RestoreWindow:prerender()
 end
 
 function RestoreWindow:refresh()
-    for _, backup in ipairs(Files.backups()) do
+    for _, backup in ipairs(Backup.merge(Files.backups(), Files.fileBackups())) do
         local head, detail = Rows.backupTitle(backup), Rows.backupDetail(backup)
         local data = { backup = backup, title = getText(head.key, unpack(head.args)), detail = getText(detail.key, unpack(detail.args)) }
         self.list:addItem(data.title, data)
@@ -82,11 +83,20 @@ function RestoreWindow:onBack()
 end
 
 function RestoreWindow:onRestore()
-    Widgets.ask({ getText("UI_Prepackaged_AskRestore", #self.backup.mods), getText("UI_Prepackaged_AskRestoreBackup") }, self, self.commit)
+    if self.backup.kind == "files" then
+        Widgets.ask({ getText("UI_Prepackaged_AskRestoreFiles"), getText("UI_Prepackaged_AskRestoreFilesBackup") }, self, self.commit)
+    else
+        Widgets.ask({ getText("UI_Prepackaged_AskRestore", #self.backup.mods), getText("UI_Prepackaged_AskRestoreBackup") }, self, self.commit)
+    end
 end
 
 function RestoreWindow:commit()
-    local result = Enable.restore(self.backup, self.state)
+    local result
+    if self.backup.kind == "files" then
+        result = Settings.restore(self.backup)
+    else
+        result = Enable.restore(self.backup, self.state)
+    end
     if result.reloaded then
         return
     end

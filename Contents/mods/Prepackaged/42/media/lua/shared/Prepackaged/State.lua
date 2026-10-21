@@ -4,20 +4,67 @@ local State = {}
 
 State.FILE = "Prepackaged/state.txt"
 State.FORMAT = 1
+local DECISIONS = { applied = true, declined = true, same = true }
 
 -- unknown keeps lines a newer Prepackaged wrote, so this one writes them back.
 function State.new()
-    return { mods = {}, unknown = {} }
+    return { mods = {}, ledger = {}, at = {}, unknown = {} }
 end
 
 local KNOWN = { format = true, current = true, source = true, applied = true, mod = true }
+
+local function where(kind, pack, key)
+    return kind .. "\n" .. pack .. "\n" .. key
+end
+
+-- The ledger holds, per pack and entry, the pack value last decided on and the value Prepackaged last applied.
+function State.decision(state, kind, pack, key)
+    local i = state.at[where(kind, pack, key)]
+    return i and state.ledger[i]
+end
+
+-- A declined or unchanged entry keeps the value applied before.
+function State.decide(state, record)
+    local id = where(record.kind, record.pack, record.key)
+    local i = state.at[id]
+    local old = i and state.ledger[i]
+    if record.applied == nil and old ~= nil then
+        record.applied = old.applied
+    end
+    if i == nil then
+        i = #state.ledger + 1
+        state.at[id] = i
+    end
+    state.ledger[i] = record
+end
+
+-- bind|pack|decision|asked|applied|name and opt|pack|decision|asked|applied|page|option. Pack values hold no |, nor
+-- do pages and options; a bind name may, so it comes last. Anything else is kept as an unknown line.
+local function ledgerLine(state, line, f)
+    if not DECISIONS[f[3]] or f[2] == "" or f[4] == "" then
+        return false
+    end
+    local applied = f[5] ~= "" and f[5] or nil
+    if f[1] == "bind" and #f >= 6 and Text.after(line, 5) ~= "" then
+        State.decide(state, { kind = "bind", pack = f[2], decision = f[3], asked = f[4], applied = applied, key = Text.after(line, 5) })
+        return true
+    elseif f[1] == "opt" and #f == 7 and f[6] ~= "" and f[7] ~= "" then
+        State.decide(state, { kind = "opt", pack = f[2], decision = f[3], asked = f[4], applied = applied, key = f[6] .. "|" .. f[7] })
+        return true
+    end
+    return false
+end
 
 function State.decode(lines)
     local state = State.new()
     for _, line in ipairs(lines) do
         local f = Text.split(line, "|")
         local kind = f[1]
-        if not KNOWN[kind] then
+        if kind == "bind" or kind == "opt" then
+            if not (#f >= 6 and ledgerLine(state, line, f)) then
+                state.unknown[#state.unknown + 1] = line
+            end
+        elseif not KNOWN[kind] then
             if line ~= "" then
                 state.unknown[#state.unknown + 1] = line
             end
@@ -50,15 +97,21 @@ function State.encode(state)
     for _, id in ipairs(state.mods) do
         lines[#lines + 1] = "mod|" .. id
     end
+    for _, r in ipairs(state.ledger) do
+        local head = r.kind .. "|" .. r.pack .. "|" .. r.decision .. "|" .. r.asked .. "|" .. (r.applied or "") .. "|"
+        lines[#lines + 1] = head .. r.key
+    end
     for _, line in ipairs(state.unknown) do
         lines[#lines + 1] = line
     end
     return lines
 end
 
--- Unknown lines stay in the state file: a backup keeps only the pack in use.
+-- Unknown lines and the ledger stay in the state file: a backup keeps only the pack in use.
 function State.pack(state)
-    return { current = state.current, source = state.source, applied = state.applied, mods = Text.copy(state.mods), unknown = {} }
+    local pack = State.new()
+    pack.current, pack.source, pack.applied, pack.mods = state.current, state.source, state.applied, Text.copy(state.mods)
+    return pack
 end
 
 function State.setPack(state, pack)

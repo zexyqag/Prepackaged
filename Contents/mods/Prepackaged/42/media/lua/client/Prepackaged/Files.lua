@@ -44,13 +44,13 @@ function Files.readModPack(modId)
     return readPack(getModFileReader(modId, Parse.FILE, false))
 end
 
-local function writeChecked(path, lines)
+local function writeChecked(path, lines, ending)
     local writer = getFileWriter(path, true, false)
     if writer == nil then
         return false
     end
     if #lines > 0 then
-        writer:write(table.concat(lines, "\n") .. "\n")
+        writer:write(table.concat(lines, ending) .. ending)
     end
     writer:close()
     local back = Files.read(path)
@@ -58,9 +58,9 @@ local function writeChecked(path, lines)
 end
 
 -- True only when the file reads back as exactly these lines: getFileWriter truncates first and its PrintWriter
--- swallows IO errors (LuaManager.java:5853-5858, 10655-10670).
-function Files.write(path, lines)
-    local ok, written = pcall(writeChecked, path, lines)
+-- swallows IO errors (LuaManager.java:5853-5858, 10655-10670). The game ends the lines of its own files with CRLF.
+function Files.write(path, lines, ending)
+    local ok, written = pcall(writeChecked, path, lines, ending or "\n")
     return ok and written
 end
 
@@ -82,11 +82,11 @@ function Files.saveState(state)
     return Files.write(State.FILE, State.encode(state))
 end
 
-function Files.backups()
+local function backups(folder, decode)
     local list = {}
-    for _, name in ipairs(Files.list(Backup.FOLDER)) do
+    for _, name in ipairs(Files.list(folder)) do
         if string.match(string.lower(name), "%.txt$") then
-            local ok, backup = pcall(function() return Backup.decode(Files.read(Backup.FOLDER .. "/" .. name) or {}) end)
+            local ok, backup = pcall(function() return decode(Files.read(folder .. "/" .. name) or {}) end)
             if ok and backup ~= nil then
                 list[#list + 1] = backup
             end
@@ -95,8 +95,20 @@ function Files.backups()
     return Backup.sort(list)
 end
 
+function Files.backups()
+    return backups(Backup.FOLDER, Backup.decode)
+end
+
+function Files.fileBackups()
+    return backups(Backup.FILES, Backup.decodeFiles)
+end
+
 function Files.saveBackup(backup)
-    return Files.write(Backup.path(backup.n), Backup.encode(backup))
+    return Files.write(Backup.path(Backup.FOLDER, backup.n), Backup.encode(backup))
+end
+
+function Files.saveFileBackup(backup)
+    return Files.write(Backup.path(Backup.FILES, backup.n), Backup.encodeFiles(backup))
 end
 
 -- The old file is copied first: a failed rewrite would lose every preset in it.

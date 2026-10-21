@@ -8,7 +8,6 @@ local Text = require "Prepackaged/Text"
 local Enable = {}
 
 Enable.RESET_REASON = "PrepackagedMods"
-local DATE = "%Y-%m-%d %H:%M"
 
 function Enable.status(id)
     local info = getModInfoByID(id)
@@ -95,11 +94,11 @@ local function commit(state, change)
     local active, maps = Enable.active(), Enable.maps()
     if not Text.same(active, change.mods) or not Text.same(maps, change.maps) then
         local backup = {
-            n = Backup.next(Files.backups()), date = os.date(DATE), mods = active, maps = maps, before = change.before,
+            n = Backup.next(Files.backups()), date = os.date(Backup.DATE), mods = active, maps = maps, before = change.before,
             pack = State.pack(state),
         }
         if not Files.saveBackup(backup) then
-            return failed("UI_Prepackaged_FailBackup", Backup.path(backup.n))
+            return failed("UI_Prepackaged_FailBackup", Backup.path(Backup.FOLDER, backup.n))
         end
     end
     local entry = change.entry
@@ -126,7 +125,7 @@ local function commit(state, change)
     saveModsFile()
     ActiveMods.getById("currentGame"):copyFrom(default)
     if ActiveMods.requiresResetLua(default) then
-        getCore():ResetLua("default", Enable.RESET_REASON)
+        getCore():ResetLua("default", change.reason)
         return { reloaded = true }
     end
     return { entry = entry }
@@ -137,6 +136,7 @@ function Enable.apply(entry, plan, state)
     return commit(state, {
         mods = plan.mods, maps = plan.maps, entry = entry, before = { kind = "pack", id = pack.id, version = pack.version },
         record = function(s, kept) State.record(s, pack, { kind = kept.source, name = kept.name }, plan.fromPack) end,
+        reason = Enable.RESET_REASON,
     })
 end
 
@@ -145,6 +145,7 @@ function Enable.restore(backup, state)
     return commit(state, {
         mods = backup.mods, maps = backup.maps, before = { kind = "restore", n = backup.n },
         record = function(s) State.setPack(s, backup.pack) end,
+        reason = Backup.RESET_REASON,
     })
 end
 

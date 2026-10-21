@@ -287,6 +287,27 @@ local function keyPart(bind, part)
     return false
 end
 
+-- The bind and the parts that aren't part of a bind.
+local function keySpec(spec)
+    local bind, bad = { altCode = 0, shift = false, ctrl = false, alt = false }, {}
+    for _, part in ipairs(split(spec, ";")) do
+        part = trim(part)
+        if part ~= "" and not keyPart(bind, part) then
+            bad[#bad + 1] = part
+        end
+    end
+    return bind, bad
+end
+
+-- A keysB42.ini value such as key:34;shift:true, or nil.
+function Parse.bindSpec(spec)
+    local bind, bad = keySpec(spec)
+    if bind.key == nil or #bad > 0 then
+        return nil
+    end
+    return bind
+end
+
 local function keyLine(ctx, n, line)
     if string.sub(line, 1, 1) == "[" then
         return
@@ -298,12 +319,10 @@ local function keyLine(ctx, n, line)
     if name == "VERSION" then
         return
     end
-    local bind = { name = name, altCode = 0, shift = false, ctrl = false, alt = false, line = n }
-    for _, part in ipairs(split(spec, ";")) do
-        part = trim(part)
-        if part ~= "" and not keyPart(bind, part) then
-            warn(ctx, n, "BadKeyPart", part)
-        end
+    local bind, bad = keySpec(spec)
+    bind.name, bind.line = name, n
+    for _, part in ipairs(bad) do
+        warn(ctx, n, "BadKeyPart", part)
     end
     if bind.key == nil then
         return warn(ctx, n, "BadKey", name)
@@ -367,6 +386,12 @@ local VALUES = {
         end
     end,
 }
+
+-- A ModOptions.ini value of this type, or nil.
+function Parse.optionValue(kind, text)
+    local read = VALUES[kind]
+    return read and (read(text))
+end
 
 -- raw is the line before trimming: the game keeps a textentry value exactly (ModOptions.lua:304-307).
 local function modOptionLine(ctx, n, line, raw)

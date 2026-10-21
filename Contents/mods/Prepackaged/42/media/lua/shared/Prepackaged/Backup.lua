@@ -4,30 +4,59 @@ local Text = require "Prepackaged/Text"
 local Backup = {}
 
 Backup.FOLDER = "Prepackaged/backups"
+-- keysB42.ini and ModOptions.ini, as copies taken before Prepackaged writes them.
+Backup.FILES = Backup.FOLDER .. "/binds"
 -- Each file is a few KB, and 20 cover months of weekly pack updates. Lua can't delete files, so the backups after the
 -- first take turns in this many files.
 Backup.KEEP = 20
+-- A restore reloads Lua with this reason.
+Backup.RESET_REASON = "PrepackagedRestore"
+Backup.DATE = "%Y-%m-%d %H:%M"
 
--- Backup 1 is the list from before Prepackaged first changed it, and is never overwritten.
-function Backup.path(n)
+-- Backup 1 of a folder is the state from before Prepackaged first changed it, and is never overwritten.
+function Backup.path(folder, n)
     if n == 1 then
-        return Backup.FOLDER .. "/first.txt"
+        return folder .. "/first.txt"
     end
-    return Backup.FOLDER .. "/" .. tostring((n - 2) % Backup.KEEP + 1) .. ".txt"
+    return folder .. "/" .. tostring((n - 2) % Backup.KEEP + 1) .. ".txt"
 end
 
 local function isCount(text)
     return text ~= nil and string.match(text, "^[0-9]+$") ~= nil
 end
 
-function Backup.encode(backup)
+local function head(backup)
     local lines = { "backup|" .. tostring(backup.n) .. "|" .. backup.date }
     local before = backup.before
-    if before.kind == "pack" then
-        lines[#lines + 1] = "before|pack|" .. before.id .. "|" .. tostring(before.version)
+    if before.kind == "pack" or before.kind == "defaults" then
+        lines[#lines + 1] = "before|" .. before.kind .. "|" .. before.id .. "|" .. tostring(before.version)
     else
         lines[#lines + 1] = "before|restore|" .. tostring(before.n)
     end
+    return lines
+end
+
+-- The backup and before lines, or false when the line is neither.
+local function readHead(backup, line, f, packKind)
+    local kind = f[1]
+    if kind == "backup" and #f >= 3 and isCount(f[2]) then
+        backup.n, backup.date = tonumber(f[2]), Text.after(line, 2)
+    elseif kind == "before" and f[2] == packKind and #f == 4 and isCount(f[4]) then
+        backup.before = { kind = packKind, id = f[3], version = tonumber(f[4]) }
+    elseif kind == "before" and f[2] == "restore" and #f == 3 and isCount(f[3]) then
+        backup.before = { kind = "restore", n = tonumber(f[3]) }
+    else
+        return false
+    end
+    return true
+end
+
+local function complete(backup)
+    return backup.n ~= nil and backup.n >= 1 and backup.before ~= nil
+end
+
+function Backup.encode(backup)
+    local lines = head(backup)
     for _, id in ipairs(backup.mods) do
         lines[#lines + 1] = "active|" .. id
     end
@@ -41,33 +70,73 @@ function Backup.encode(backup)
 end
 
 function Backup.decode(lines)
-    local backup, rest = { mods = {}, maps = {} }, {}
+    local backup, rest = { kind = "mods", mods = {}, maps = {} }, {}
     for _, line in ipairs(lines) do
         local f = Text.split(line, "|")
-        local kind = f[1]
-        if kind == "backup" and #f >= 3 and isCount(f[2]) then
-            backup.n, backup.date = tonumber(f[2]), Text.after(line, 2)
-        elseif kind == "before" and f[2] == "pack" and #f == 4 and isCount(f[4]) then
-            backup.before = { kind = "pack", id = f[3], version = tonumber(f[4]) }
-        elseif kind == "before" and f[2] == "restore" and #f == 3 and isCount(f[3]) then
-            backup.before = { kind = "restore", n = tonumber(f[3]) }
-        elseif kind == "active" and #f >= 2 then
-            backup.mods[#backup.mods + 1] = Text.after(line, 1)
-        elseif kind == "map" and #f >= 2 then
-            backup.maps[#backup.maps + 1] = Text.after(line, 1)
-        else
-            rest[#rest + 1] = line
+        if not readHead(backup, line, f, "pack") then
+            if f[1] == "active" and #f >= 2 then
+                backup.mods[#backup.mods + 1] = Text.after(line, 1)
+            elseif f[1] == "map" and #f >= 2 then
+                backup.maps[#backup.maps + 1] = Text.after(line, 1)
+            else
+                rest[#rest + 1] = line
+            end
         end
     end
-    if backup.n == nil or backup.n < 1 or backup.before == nil then
+    if not complete(backup) then
         return nil
     end
     backup.pack = State.pack(State.decode(rest))
     return backup
 end
 
+-- The lines of both files as they were read.
+function Backup.encodeFiles(backup)
+    local lines = head(backup)
+    for _, line in ipairs(backup.keys) do
+        lines[#lines + 1] = "keys|" .. line
+    end
+    for _, line in ipairs(backup.options) do
+        lines[#lines + 1] = "options|" .. line
+    end
+    return lines
+end
+
+function Backup.decodeFiles(lines)
+    local backup = { kind = "files", keys = {}, options = {} }
+    for _, line in ipairs(lines) do
+        local f = Text.split(line, "|")
+        if not readHead(backup, line, f, "defaults") then
+            if f[1] == "keys" and #f >= 2 then
+                backup.keys[#backup.keys + 1] = Text.after(line, 1)
+            elseif f[1] == "options" and #f >= 2 then
+                backup.options[#backup.options + 1] = Text.after(line, 1)
+            end
+        end
+    end
+    if not complete(backup) then
+        return nil
+    end
+    return backup
+end
+
 function Backup.sort(list)
     table.sort(list, function(a, b) return a.n > b.n end)
+    return list
+end
+
+-- Both kinds newest first: each in its own order, the two by date, and on the same minute the key binds first.
+function Backup.merge(mods, files)
+    local list, i, j = {}, 1, 1
+    while mods[i] ~= nil or files[j] ~= nil do
+        if mods[i] == nil or (files[j] ~= nil and files[j].date >= mods[i].date) then
+            list[#list + 1] = files[j]
+            j = j + 1
+        else
+            list[#list + 1] = mods[i]
+            i = i + 1
+        end
+    end
     return list
 end
 

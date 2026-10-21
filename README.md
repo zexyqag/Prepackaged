@@ -2,7 +2,7 @@
 
 A Project Zomboid Build 42 mod that turns a mod pack into a guided setup. A pack author ships one small pack file; Prepackaged finds it and enables the pack's mods in the pack's load order, after a review of every change.
 
-> **Status: in development.** Only pack discovery and mod enabling exist so far. The pack format may still change.
+> **Status: in development.** Pack discovery, mod enabling and the key bind and mod option defaults exist so far. The pack format may still change.
 
 ## Using a pack
 
@@ -17,6 +17,8 @@ A Project Zomboid Build 42 mod that turns a mod pack into a guided setup. A pack
 Using a pack replaces your mod list. Mods you add afterwards are yours: when the pack updates, only the mods that came from the pack change. Each mod's `require=` mods are put before it, as the game loads them. Where the pack's order goes against a mod's own `require=`, `loadModAfter=` or `loadModBefore=`, the review and the pack's details list it, and the pack's order is used.
 
 **Restore** in the Prepackaged window lists the backups with their date and number of mods, and puts one back in its exact order, after backing up the list in use. Your list from before Prepackaged is kept for good; of the others, the newest 20 are kept, in `Zomboid/Lua/Prepackaged/backups`.
+
+A pack's key binds and mod options are suggestions, never forced. After Apply, a review shows them in sections (key binds, then each mod's options) as your value and the pack's value, and changes only the rows you tick. A tick starts on where you have the game's default or what Prepackaged set before. The review also lists keys that end up on more than one action, and entries of mods that aren't loaded, which wait for the next start. What you untick isn't asked again until the pack changes it, and **Defaults** in the Prepackaged window shows the review again, with every entry if you like. `keysB42.ini` and `ModOptions.ini` are backed up first, the same way as the mod list, and Restore puts them back.
 
 ## Pack file format
 
@@ -58,4 +60,4 @@ ExampleMap = Map: Example Town
 3000000002 = Maps | 3000000103
 ```
 
-`@keys`, `@modoptions`, `@sandbox` and `@locks` are read and checked already; applying them comes in later versions.
+`@sandbox` and `@locks` are read and checked already; applying them comes in later versions.

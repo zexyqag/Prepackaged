@@ -7,6 +7,10 @@ local function text(rows, style, key, ...)
     rows[#rows + 1] = { style = style, key = key, args = { ... } }
 end
 
+local function modified(bind)
+    return bind.shift or bind.ctrl or bind.alt
+end
+
 local function mods(rows, list, of)
     for _, id in ipairs(list) do
         rows[#rows + 1] = { style = "mod", id = id, name = of and of(id) }
@@ -61,7 +65,65 @@ local function notes(rows, style, heading, list, more)
     end
 end
 
-function Rows.details(entry, state, packConflicts, of)
+-- An entry's name as the game shows it, else as the pack writes it.
+local function label(item)
+    local target = item.target
+    if target ~= nil and target.page ~= nil then
+        return target.pageTitle .. ": " .. target.title
+    elseif target ~= nil then
+        return target.title
+    elseif item.kind == "bind" then
+        return item.name
+    end
+    return item.page .. ": " .. item.option
+end
+
+local function reasons(rows, list, style, lines)
+    for i, item in ipairs(list) do
+        if i > Parse.MAX_NOTES then
+            text(rows, "note", "UI_Prepackaged_DetailMore", #list - Parse.MAX_NOTES)
+            return
+        end
+        rows[#rows + 1] = { style = style, line = lines and item.line or nil, key = "UI_Prepackaged_Reason_" .. item.reason, args = { label(item), unpack(item.args) } }
+    end
+end
+
+local function blocked(rows, review)
+    if review.blocked.binds ~= nil then
+        text(rows, "alert", "UI_Prepackaged_DefaultsFeatureKeys", review.blocked.binds)
+    end
+    if review.blocked.options ~= nil then
+        text(rows, "alert", "UI_Prepackaged_DefaultsFeatureOptions", review.blocked.options)
+    end
+end
+
+-- For the pack's author: every entry the game as loaded now can't place, in line order.
+local function unplaced(rows, check)
+    text(rows, "text", "UI_Prepackaged_DetailDefaults", check.keys, check.options)
+    local review = check.review
+    blocked(rows, review)
+    local at, last = {}, 0
+    for _, items in ipairs({ review.invalid, review.waiting }) do
+        for _, item in ipairs(items) do
+            if item.reason ~= "Feature" then
+                at[item.line], last = item, math.max(last, item.line)
+            end
+        end
+    end
+    local list = {}
+    for line = 1, last do
+        if at[line] ~= nil then
+            list[#list + 1] = at[line]
+        end
+    end
+    if #list == 0 then
+        return
+    end
+    text(rows, "section", "UI_Prepackaged_DetailUnplaced", #list)
+    reasons(rows, list, "warning", true)
+end
+
+function Rows.details(entry, state, packConflicts, of, check)
     local result, rows = entry.result, {}
     local pack = result.pack
     local name = Rows.name(pack)
@@ -86,6 +148,9 @@ function Rows.details(entry, state, packConflicts, of)
     local use = Rows.use(pack, state)
     if use ~= nil then
         text(rows, "note", use.key, unpack(use.args))
+    end
+    if check ~= nil then
+        unplaced(rows, check)
     end
     notes(rows, "error", "UI_Prepackaged_DetailErrors", result.errors, result.more.errors)
     notes(rows, "warning", "UI_Prepackaged_DetailWarnings", result.warnings, result.more.warnings)
@@ -163,7 +228,82 @@ function Rows.review(plan, pack, state, names)
     return rows
 end
 
+-- Each row's tick is ticks[row.item]. names: pack and version for the title, value(target, value) and key(code) as
+-- the game names them.
+function Rows.defaults(review, ticks, clashes, names)
+    local rows = {}
+    text(rows, "title", review.all and "UI_Prepackaged_DefaultsAllHead" or "UI_Prepackaged_DefaultsHead", names.pack, names.version)
+    text(rows, "note", "UI_Prepackaged_DefaultsIntro")
+    blocked(rows, review)
+    local sections = { keys = {}, options = {} }
+    for _, item in ipairs(review.rows) do
+        local list = sections[item.section]
+        list[#list + 1] = item
+    end
+    for _, section in ipairs({ { "UI_Prepackaged_DefaultsKeys", sections.keys }, { "UI_Prepackaged_DefaultsOptions", sections.options } }) do
+        local list = section[2]
+        if #list > 0 then
+            text(rows, "section", section[1], #list)
+            local group = nil
+            for _, item in ipairs(list) do
+                local target = item.target
+                if target.group ~= group then
+                    group = target.group
+                    rows[#rows + 1] = { style = "group", text = group.title }
+                end
+                local key = item.declined and "UI_Prepackaged_DefaultsDeclined" or item.own and "UI_Prepackaged_DefaultsOwn" or "UI_Prepackaged_DefaultsChange"
+                rows[#rows + 1] = {
+                    style = "tick", status = "ok", item = item, ticked = ticks[item] == true, key = key,
+                    args = { target.title, names.value(target, item.from), names.value(target, item.to) },
+                }
+            end
+        end
+    end
+    if #clashes > 0 then
+        text(rows, "section", "UI_Prepackaged_DefaultsClashes", #clashes)
+        for _, clash in ipairs(clashes) do
+            text(rows, "warning", "UI_Prepackaged_DefaultsClash", names.key(clash.key))
+            for _, e in ipairs(clash.binds) do
+                local target = e.target
+                if e.mod or not modified(e.bind) then
+                    text(rows, "item", "UI_Prepackaged_DefaultsClashBind", target.title, target.group.title)
+                else
+                    text(rows, "item", "UI_Prepackaged_DefaultsClashKey", target.title, target.group.title, names.value(target, e.bind))
+                end
+            end
+        end
+    end
+    if #review.invalid > 0 then
+        text(rows, "section", "UI_Prepackaged_DefaultsInvalid", #review.invalid)
+        reasons(rows, review.invalid, "warning", false)
+    end
+    if #review.waiting > 0 then
+        text(rows, "section", "UI_Prepackaged_DefaultsWaiting", #review.waiting)
+        reasons(rows, review.waiting, "item", false)
+    end
+    if #review.server > 0 then
+        text(rows, "section", "UI_Prepackaged_DefaultsServer", #review.server)
+        reasons(rows, review.server, "item", false)
+    end
+    if #review.same > 0 then
+        text(rows, "note", "UI_Prepackaged_DefaultsSame", #review.same)
+    end
+    if review.decided > 0 then
+        text(rows, "note", "UI_Prepackaged_DefaultsDecided", review.decided)
+    end
+    text(rows, "note", #review.rows > 0 and "UI_Prepackaged_DefaultsRestart" or "UI_Prepackaged_DefaultsNothing")
+    return rows
+end
+
 function Rows.backupTitle(backup)
+    if backup.kind == "files" then
+        if backup.n == 1 then
+            return { key = "UI_Prepackaged_FilesFirst", args = {} }
+        elseif backup.before.kind == "defaults" then
+            return { key = "UI_Prepackaged_FilesBeforePack", args = { backup.before.id, backup.before.version } }
+        end
+        return { key = "UI_Prepackaged_FilesBeforeRestore", args = { backup.before.n } }
+    end
     if backup.n == 1 then
         return { key = "UI_Prepackaged_BackupFirst", args = {} }
     elseif backup.before.kind == "pack" then
@@ -173,6 +313,9 @@ function Rows.backupTitle(backup)
 end
 
 function Rows.backupDetail(backup)
+    if backup.kind == "files" then
+        return { key = "UI_Prepackaged_FilesDetail", args = { backup.n, backup.date } }
+    end
     return { key = "UI_Prepackaged_BackupDetail", args = { backup.n, backup.date, #backup.mods } }
 end
 
@@ -182,6 +325,12 @@ function Rows.backup(backup, of)
     text(rows, "title", head.key, unpack(head.args))
     local detail = Rows.backupDetail(backup)
     text(rows, "text", detail.key, unpack(detail.args))
+    if backup.kind == "files" then
+        text(rows, "text", "UI_Prepackaged_FilesKeys", #backup.keys)
+        text(rows, "text", "UI_Prepackaged_FilesOptions", #backup.options)
+        text(rows, "note", "UI_Prepackaged_FilesRestore")
+        return rows
+    end
     text(rows, "section", "UI_Prepackaged_BackupMods", #backup.mods)
     mods(rows, backup.mods, of)
     if #backup.maps > 0 then

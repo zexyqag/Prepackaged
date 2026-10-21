@@ -1,10 +1,12 @@
 require "ISUI/ISPanel"
+local DefaultsWindow = require "Prepackaged/UI/DefaultsWindow"
 local Discovery = require "Prepackaged/Discovery"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local RestoreWindow = require "Prepackaged/UI/RestoreWindow"
 local ReviewWindow = require "Prepackaged/UI/ReviewWindow"
 local Rows = require "Prepackaged/Rows"
+local Settings = require "Prepackaged/Settings"
 local Widgets = require "Prepackaged/UI/Widgets"
 
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -47,6 +49,7 @@ function PackWindow:createChildren()
     self.backButton:enableCancelColor()
     self.pasteButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Paste") }, self.onPaste)
     self.restoreButton = Widgets.button(self, self.pasteButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Restore") }, self.onRestore)
+    self.defaultsButton = Widgets.button(self, self.restoreButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Defaults") }, self.onDefaults)
     self.useButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Use"), getText("UI_Prepackaged_Update") }, self.onUse)
     self.useButton:setX(self.width - UI_BORDER_SPACING - self.useButton.width)
     self.useButton:enableAcceptColor()
@@ -114,6 +117,12 @@ function PackWindow:refresh(wanted)
         end
     end
     self.status = self:statusText(current)
+    self.current = current
+    local ok, waiting = pcall(Settings.waiting, current, self.state)
+    if ok and waiting > 0 then
+        self.status = getText("UI_Prepackaged_StatusDefaults", self.status, waiting)
+    end
+    self.defaultsButton:setEnable(Settings.applies(current, self.state))
     self.list.selected = selected
     self:onSelect(self.list.items[selected] and self.list.items[selected].item)
 end
@@ -125,7 +134,8 @@ function PackWindow:onSelect(data)
         self.useButton:setEnable(false)
         return
     end
-    self.details:setRows(Rows.details(self.entry, self.state, Enable.packConflicts(self.entry), Enable.nameOf))
+    local ok, check = pcall(Settings.check, self.entry)
+    self.details:setRows(Rows.details(self.entry, self.state, Enable.packConflicts(self.entry), Enable.nameOf, ok and check or nil))
     self.useButton:setEnable(#self.entry.result.errors == 0)
     self.useButton:setTitle(getText(Discovery.isUpdate(self.entry, self.state) and "UI_Prepackaged_Update" or "UI_Prepackaged_Use"))
 end
@@ -151,15 +161,42 @@ function PackWindow:onUse()
     self.review = ReviewWindow.open(self, self.entry, self.state)
 end
 
--- A pasted pack that was applied is a file now.
+-- A pasted pack that was applied is a file now. Without a reload the pack's defaults can be reviewed at once.
 function PackWindow:onReviewClosed(applied)
     self.review = nil
     self:setVisible(true)
     if applied then
         self.pasted = nil
         self:refresh()
+        self:offerDefaults()
     else
         self:refresh(self.entry)
+    end
+end
+
+-- Right after using a pack: the review opens by itself when something waits.
+function PackWindow:offerDefaults()
+    local ok, waiting = pcall(Settings.waiting, self.current, self.state)
+    if ok and waiting > 0 then
+        self:onDefaults()
+    end
+end
+
+function PackWindow:onDefaults()
+    self:setVisible(false)
+    self.defaults = DefaultsWindow.open(self, self.current)
+end
+
+function PackWindow:onDefaultsClosed(result)
+    self.defaults = nil
+    self:setVisible(true)
+    self:refresh(self.entry)
+    if result == nil then
+        return
+    elseif result.error ~= nil then
+        Widgets.tell({ getText(result.error, unpack(result.args)) })
+    elseif result.changed > 0 then
+        self.status = getText("UI_Prepackaged_DefaultsDone", result.changed)
     end
 end
 
@@ -177,6 +214,9 @@ end
 function PackWindow:onModsModified()
     if self.review ~= nil then
         self.review:update()
+    end
+    if self.defaults ~= nil then
+        self.defaults:update()
     end
     self:refresh(self.entry)
 end
