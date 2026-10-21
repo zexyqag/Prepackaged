@@ -8,6 +8,8 @@ local UI_BORDER_SPACING = 10
 local BUTTON_HGT = FONT_HGT_SMALL + 6
 local BUTTON_PADDING = 32 + UI_BORDER_SPACING * 2
 local INDENT = UI_BORDER_SPACING * 2
+-- Deeper rows keep this indent, so their text keeps its room.
+local MAX_DEPTH = 6
 local BOX = FONT_HGT_SMALL + 4
 local SCROLLBAR = 20
 local GHC = getCore():getGoodHighlitedColor()
@@ -90,10 +92,17 @@ local function rowText(row)
         return text
     end
     local text = getText(row.key, unpack(row.args))
+    for _, part in ipairs(row.parts or {}) do
+        text = getText("UI_Prepackaged_Also", text, getText(part.key, unpack(part.args)))
+    end
     if row.line ~= nil and row.line > 0 then
         return getText("UI_Prepackaged_Line", row.line, text)
     end
     return text
+end
+
+local function indent(style, row)
+    return style.indent + math.min(row.depth or 0, MAX_DEPTH) * INDENT
 end
 
 local STYLES = {
@@ -108,6 +117,8 @@ local STYLES = {
     item = { font = UIFont.Small, top = 0, indent = INDENT, r = 0.7, g = 0.7, b = 0.7 },
     group = { font = UIFont.Small, top = UI_BORDER_SPACING / 2, indent = INDENT / 2, r = 0.9, g = 0.9, b = 0.9 },
     tick = { font = UIFont.Small, top = 2, indent = INDENT, r = 0.9, g = 0.9, b = 0.9 },
+    collection = { font = UIFont.Small, top = 2, indent = 0, r = 0.9, g = 0.9, b = 0.9 },
+    done = { font = UIFont.Small, top = 2, indent = 0, r = GHC:getR(), g = GHC:getG(), b = GHC:getB() },
 }
 
 Widgets.RowList = ISScrollingListBox:derive("PrepackagedRowList")
@@ -119,6 +130,8 @@ function RowList:new(x, y, width, height)
     o.borderColor = { r = 1, g = 1, b = 1, a = 0.2 }
     o.drawBorder = true
     o.tickTexture = getTexture("media/ui/inventoryPanes/Tickbox_Tick.png")
+    o.openTitle = getText("UI_Prepackaged_Open")
+    o.openWidth = getTextManager():MeasureStringX(UIFont.Small, o.openTitle) + UI_BORDER_SPACING * 2
     return o
 end
 
@@ -127,24 +140,49 @@ function RowList:setOnTick(target, onTick)
     self.onTick = onTick
 end
 
+-- A row with open = id has an Open box at its right; a click on the box calls onOpen(target, row), once.
+function RowList:setOnOpen(target, onOpen)
+    self.openTarget = target
+    self.onOpen = onOpen
+end
+
+function RowList:openX()
+    return self.width - SCROLLBAR - UI_BORDER_SPACING - self.openWidth
+end
+
 function RowList:setRows(rows)
     self:clear()
     self.selected = -1
     local width = self.width - UI_BORDER_SPACING * 2 - SCROLLBAR
     for _, row in ipairs(rows) do
         local style = STYLES[row.style]
-        local textWidth = width - style.indent - (row.style == "tick" and BOX + UI_BORDER_SPACING / 2 or 0)
+        local textWidth = width - indent(style, row) - (row.style == "tick" and BOX + UI_BORDER_SPACING / 2 or 0)
+        if row.open ~= nil then
+            textWidth = textWidth - self.openWidth - UI_BORDER_SPACING
+        end
         local item = self:addItem("", row)
         item.lines = wrap(rowText(row), style.font, textWidth)
         item.height = style.top + #item.lines * getTextManager():getFontHeight(style.font) + 4
     end
 end
 
+-- Only rows in view are drawn, as vanilla's own list does, so a long list costs nothing per frame.
 function RowList:doDrawItem(y, item, alt)
+    if y + self:getYScroll() + item.height < 0 or y + self:getYScroll() >= self.height then
+        return y + item.height
+    end
     local row, style = item.item, STYLES[item.item.style]
     local top = y + style.top + 2
-    local x = UI_BORDER_SPACING + style.indent
+    local x = UI_BORDER_SPACING + indent(style, row)
     local r, g, b = style.r, style.g, style.b
+    if row.open ~= nil then
+        local openX = self:openX()
+        if self.mouseoverselected == item.index and self:isMouseOver() then
+            self:drawRect(openX, top, self.openWidth, BOX, 1, 0.3, 0.3, 0.3)
+        end
+        self:drawRectBorder(openX, top, self.openWidth, BOX, 1, 0.6, 0.6, 0.6)
+        self:drawText(self.openTitle, openX + UI_BORDER_SPACING, top + 2, 1, 1, 1, 1, UIFont.Small)
+    end
     if row.style == "section" then
         self:drawRect(UI_BORDER_SPACING, y + style.top - 1, self.width - UI_BORDER_SPACING * 2, 1, 0.2, 1, 1, 1)
     elseif row.style == "tick" then
@@ -171,9 +209,16 @@ end
 
 function RowList:onMouseDown(x, y)
     local item = self.items[self:rowAt(x, y)]
-    if item ~= nil and item.item.style == "tick" and item.item.status == "ok" and self.onTick ~= nil then
+    if item == nil then
+        return
+    end
+    local row = item.item
+    if row.open ~= nil and self.onOpen ~= nil and x >= self:openX() and x < self:openX() + self.openWidth then
         getSoundManager():playUISound("UISelectListItem")
-        self.onTick(self.tickTarget, item.item)
+        self.onOpen(self.openTarget, row)
+    elseif row.style == "tick" and row.status == "ok" and self.onTick ~= nil then
+        getSoundManager():playUISound("UISelectListItem")
+        self.onTick(self.tickTarget, row)
     end
 end
 

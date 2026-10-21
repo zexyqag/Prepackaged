@@ -5,6 +5,7 @@ local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local ModList = require "Prepackaged/ModList"
 local Rows = require "Prepackaged/Rows"
+local SubscriptionsWindow = require "Prepackaged/UI/SubscriptionsWindow"
 local Widgets = require "Prepackaged/UI/Widgets"
 
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -38,7 +39,7 @@ function ReviewWindow:createChildren()
     self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_btn_back") }, self.onBack)
     self.backButton:enableCancelColor()
     self.presetButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_SavePreset") }, self.onPreset)
-    self.collectionButton = Widgets.button(self, self.presetButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_OpenCollection") }, self.onCollection)
+    self.subscriptionsButton = Widgets.button(self, self.presetButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Subscriptions") }, self.onSubscriptions)
     self.applyButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Apply") }, self.onApply)
     self.applyButton:setX(self.width - UI_BORDER_SPACING - self.applyButton.width)
     self.applyButton:enableAcceptColor()
@@ -56,7 +57,7 @@ function ReviewWindow:update()
     local pack = self.entry.result.pack
     self.plan = Enable.plan(self.entry, self.state, self.ticks)
     self.list:setRows(Rows.review(self.plan, pack, self.state, { pack = Rows.name(pack), of = Enable.nameOf }))
-    self.collectionButton:setVisible(#self.plan.missing > 0 and #pack.collection > 0 and isSteamOverlayEnabled())
+    self.subscriptionsButton:setVisible(#self.plan.missing > 0)
 end
 
 function ReviewWindow:onTick(row)
@@ -93,8 +94,13 @@ function ReviewWindow:onPresetName(button)
     end
 end
 
-function ReviewWindow:onCollection()
-    activateSteamOverlayToWorkshopItem(self.entry.result.pack.collection[1])
+function ReviewWindow:onSubscriptions()
+    self:setVisible(false)
+    SubscriptionsWindow.open(self, self.entry)
+end
+
+function ReviewWindow:onSubscriptionsClosed()
+    self:setVisible(true)
 end
 
 function ReviewWindow:close(applied)

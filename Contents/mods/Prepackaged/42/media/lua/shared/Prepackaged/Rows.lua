@@ -1,5 +1,6 @@
 -- Text from a pack is only ever an argument or a row's literal text, never a format.
 local Parse = require "Prepackaged/Parse"
+local Subscriptions = require "Prepackaged/Subscriptions"
 local Version = require "Prepackaged/Version"
 
 local Rows = {}
@@ -145,6 +146,9 @@ function Rows.details(entry, state, packConflicts, of, check)
     text(rows, "text", source.key, unpack(source.args))
     text(rows, "text", "UI_Prepackaged_DetailMods", #pack.mods, #pack.optional)
     text(rows, "text", "UI_Prepackaged_DetailItems", #pack.workshopItems, #pack.collections)
+    if #pack.collection > 0 and #pack.collections == 0 then
+        text(rows, "note", "UI_Prepackaged_DetailNoCollections")
+    end
     if pack.map ~= nil then
         text(rows, "text", "UI_Prepackaged_DetailMap", pack.map)
     end
@@ -190,9 +194,6 @@ function Rows.review(plan, pack, state, names)
     if #plan.missing > 0 then
         text(rows, "alert", "UI_Prepackaged_ReviewMissingCount", #plan.missing, #pack.mods)
         text(rows, "note", "UI_Prepackaged_ReviewSubscribe")
-        if #pack.collection > 0 then
-            text(rows, "note", "UI_Prepackaged_ReviewCollection", pack.collection[1])
-        end
     end
     if #plan.optional > 0 then
         text(rows, "section", "UI_Prepackaged_ReviewOptional", #plan.optional)
@@ -366,6 +367,89 @@ function Rows.backup(backup, of)
         text(rows, "alert", "UI_Prepackaged_RestoreWithout")
     end
     text(rows, "note", "UI_Prepackaged_RestoreBackup")
+    return rows
+end
+
+local ITEM = {
+    NotSubscribed = "UI_Prepackaged_SubsItemNotSubscribed", Downloading = "UI_Prepackaged_SubsItemDownloading",
+    NeedsUpdate = "UI_Prepackaged_SubsItemNeedsUpdate", Error = "UI_Prepackaged_SubsItemError", NoDetails = "UI_Prepackaged_SubsItemNoDetails",
+    NoAnswer = "UI_Prepackaged_SubsItemNoAnswer", Unknown = "UI_Prepackaged_SubsItemUnknown", Asking = "UI_Prepackaged_SubsItemAsking",
+}
+
+local function part(row, key, n)
+    if n > 0 then
+        row.parts[#row.parts + 1] = { key = key, args = { n } }
+    end
+end
+
+-- The collection's own items: its page's Subscribe to all covers those, not its sub-collections.
+local function collection(line, result)
+    local name = line.entry.title ~= "" and line.entry.title or line.id
+    local count = Subscriptions.count(line.entry.items, result.states)
+    local row = { style = "collection", depth = line.depth, name = name, parts = {} }
+    if count.action then
+        row.open = line.id
+    end
+    if count.total == 0 then
+        row.key, row.args = "UI_Prepackaged_SubsEmpty", { name }
+    elseif count.Installed == count.total then
+        row.style, row.key, row.args = "done", "UI_Prepackaged_SubsDone", { name, count.total }
+    elseif count.asking + count.unknown == count.total then
+        row.key, row.args = "UI_Prepackaged_SubsCount", { name, count.total }
+        part(row, "UI_Prepackaged_SubsAsking", count.asking)
+    else
+        row.key, row.args = "UI_Prepackaged_SubsLine", { name, count.total, count.NotSubscribed }
+        part(row, "UI_Prepackaged_SubsDownloading", count.Downloading)
+        part(row, "UI_Prepackaged_SubsNeedsUpdate", count.NeedsUpdate)
+        part(row, "UI_Prepackaged_SubsMissing", count.missing)
+        part(row, "UI_Prepackaged_SubsAsking", count.asking)
+    end
+    return row
+end
+
+-- Only items that aren't installed get a row; an Open only where nothing is on its way.
+local function loose(rows, tree, result)
+    if #tree.loose == 0 then
+        return
+    end
+    text(rows, "section", tree.listed and "UI_Prepackaged_SubsLoose" or "UI_Prepackaged_SubsItems", #tree.loose)
+    local installed = 0
+    for _, id in ipairs(tree.loose) do
+        local state = result.states[id]
+        if state == "Installed" then
+            installed = installed + 1
+        else
+            local name = result.titles[id] or id
+            rows[#rows + 1] = { style = "item", key = ITEM[state], args = { name }, name = name, open = Subscriptions.needsAction(state) and id or nil }
+        end
+    end
+    if installed == #tree.loose then
+        text(rows, "done", "UI_Prepackaged_SubsAllInstalled", installed)
+    elseif installed > 0 then
+        text(rows, "note", "UI_Prepackaged_SubsMoreInstalled", installed)
+    end
+end
+
+function Rows.subscriptions(tree, result, overlay)
+    local rows = {}
+    text(rows, "note", "UI_Prepackaged_SubsIntro")
+    if not result.steam then
+        text(rows, "alert", "UI_Prepackaged_SubsNoSteam")
+    elseif not overlay then
+        text(rows, "alert", "UI_Prepackaged_SubsNoOverlay")
+    end
+    if #tree.lines > 0 then
+        text(rows, "section", "UI_Prepackaged_SubsCollections", #tree.lines)
+    end
+    for _, line in ipairs(tree.lines) do
+        if line.entry == nil then
+            rows[#rows + 1] = { style = "collection", depth = line.depth, key = "UI_Prepackaged_SubsUnlisted", args = { line.id }, name = line.id, open = line.id }
+        else
+            rows[#rows + 1] = collection(line, result)
+        end
+    end
+    loose(rows, tree, result)
+    text(rows, "note", "UI_Prepackaged_SubsAfter")
     return rows
 end
 

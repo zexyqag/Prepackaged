@@ -7,6 +7,7 @@ local RestoreWindow = require "Prepackaged/UI/RestoreWindow"
 local ReviewWindow = require "Prepackaged/UI/ReviewWindow"
 local Rows = require "Prepackaged/Rows"
 local Settings = require "Prepackaged/Settings"
+local SubscriptionsWindow = require "Prepackaged/UI/SubscriptionsWindow"
 local Widgets = require "Prepackaged/UI/Widgets"
 
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -50,6 +51,7 @@ function PackWindow:createChildren()
     self.pasteButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Paste") }, self.onPaste)
     self.restoreButton = Widgets.button(self, self.pasteButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Restore") }, self.onRestore)
     self.defaultsButton = Widgets.button(self, self.restoreButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Defaults") }, self.onDefaults)
+    self.subscriptionsButton = Widgets.button(self, self.defaultsButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Subscriptions") }, self.onSubscriptions)
     self.useButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Use"), getText("UI_Prepackaged_Update") }, self.onUse)
     self.useButton:setX(self.width - UI_BORDER_SPACING - self.useButton.width)
     self.useButton:enableAcceptColor()
@@ -133,8 +135,11 @@ function PackWindow:onSelect(data)
     if self.entry == nil then
         self.details:setRows({ { style = "note", key = "UI_Prepackaged_NoPacks", args = {} } })
         self.useButton:setEnable(false)
+        self.subscriptionsButton:setEnable(false)
         return
     end
+    local pack = self.entry.result.pack
+    self.subscriptionsButton:setEnable(#pack.workshopItems + #pack.collection + #pack.collections > 0)
     local ok, check = pcall(Settings.check, self.entry)
     self.details:setRows(Rows.details(self.entry, self.state, Enable.packConflicts(self.entry), Enable.nameOf, ok and check or nil))
     self.useButton:setEnable(#self.entry.result.errors == 0)
@@ -199,6 +204,15 @@ function PackWindow:onDefaultsClosed(result)
     elseif result.changed > 0 then
         self.status = getText("UI_Prepackaged_DefaultsDone", result.changed)
     end
+end
+
+function PackWindow:onSubscriptions()
+    self:setVisible(false)
+    SubscriptionsWindow.open(self, self.entry)
+end
+
+function PackWindow:onSubscriptionsClosed()
+    self:setVisible(true)
 end
 
 function PackWindow:onRestore()
