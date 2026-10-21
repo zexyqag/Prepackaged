@@ -18,12 +18,25 @@ local BHC = getCore():getBadHighlitedColor()
 local Widgets = {}
 
 -- Wide enough for each of titles, so a title can change without a new layout.
-function Widgets.button(parent, x, y, titles, onClick)
-    local width = 0
+local function width(titles)
+    local w = 0
     for _, title in ipairs(titles) do
-        width = math.max(width, BUTTON_PADDING + getTextManager():MeasureStringX(UIFont.Small, title))
+        w = math.max(w, BUTTON_PADDING + getTextManager():MeasureStringX(UIFont.Small, title))
     end
-    local b = ISButton:new(x, y, width, BUTTON_HGT, titles[1], parent, onClick)
+    return w
+end
+
+-- A button's width for these text keys.
+function Widgets.width(keys)
+    local titles = {}
+    for i, key in ipairs(keys) do
+        titles[i] = getText(key)
+    end
+    return width(titles)
+end
+
+function Widgets.button(parent, x, y, titles, onClick)
+    local b = ISButton:new(x, y, width(titles), BUTTON_HGT, titles[1], parent, onClick)
     b:initialise()
     b:instantiate()
     b.borderColor = { r = 1, g = 1, b = 1, a = 0.1 }
@@ -45,6 +58,14 @@ end
 -- lines are joined with line breaks: the dialog grows to its longest line and doesn't wrap (ISModalDialog.CalcSize).
 function Widgets.tell(lines)
     return modal(table.concat(lines, "\n"), false)
+end
+
+function Widgets.lines(list)
+    local lines = {}
+    for i, line in ipairs(list) do
+        lines[i] = getText(line.key, unpack(line.args))
+    end
+    return lines
 end
 
 function Widgets.ask(lines, target, onYes)
@@ -119,6 +140,7 @@ local STYLES = {
     tick = { font = UIFont.Small, top = 2, indent = INDENT, r = 0.9, g = 0.9, b = 0.9 },
     collection = { font = UIFont.Small, top = 2, indent = 0, r = 0.9, g = 0.9, b = 0.9 },
     done = { font = UIFont.Small, top = 2, indent = 0, r = GHC:getR(), g = GHC:getG(), b = GHC:getB() },
+    code = { font = UIFont.Small, top = 0, indent = INDENT, r = 0.8, g = 0.8, b = 0.6 },
 }
 
 Widgets.RowList = ISScrollingListBox:derive("PrepackagedRowList")

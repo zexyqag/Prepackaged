@@ -3,7 +3,10 @@ local Backup = require "Prepackaged/Backup"
 local Discovery = require "Prepackaged/Discovery"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
+local Host = require "Prepackaged/Host"
 local PackWindow = require "Prepackaged/UI/PackWindow"
+local SandboxScreen = require "Prepackaged/SandboxScreen"
+local ServerWindow = require "Prepackaged/UI/ServerWindow"
 local Settings = require "Prepackaged/Settings"
 
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -87,8 +90,20 @@ local function addButton()
     refreshTitle()
 end
 
+-- Vanilla's handler, registered before any mod's, has made the sandbox screen (MainScreen.lua:716, 2178).
+local function onMainMenuEnter()
+    addButton()
+    pcall(SandboxScreen.add)
+    pcall(SandboxScreen.ensurePreset)
+end
+
 -- The reload after using a pack is the first time its mods' options exist, so their review opens by itself, once.
 local function onResetLua(reason)
+    if reason == Host.RELOAD then
+        Host.resume()
+    elseif reason == Host.DONE then
+        ServerWindow.finished(Host.done())
+    end
     if reason == Enable.RESET_REASON or reason == Backup.RESET_REASON then
         openWindow()
     end
@@ -104,6 +119,6 @@ local function onModsModified()
     end
 end
 
-Events.OnMainMenuEnter.Add(addButton)
+Events.OnMainMenuEnter.Add(onMainMenuEnter)
 Events.OnResetLua.Add(onResetLua)
 Events.OnModsModified.Add(onModsModified)

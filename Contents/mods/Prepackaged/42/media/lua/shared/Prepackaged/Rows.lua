@@ -1,5 +1,7 @@
 -- Text from a pack is only ever an argument or a row's literal text, never a format.
 local Parse = require "Prepackaged/Parse"
+local Sandbox = require "Prepackaged/Sandbox"
+local Server = require "Prepackaged/Server"
 local Subscriptions = require "Prepackaged/Subscriptions"
 local Version = require "Prepackaged/Version"
 
@@ -7,6 +9,17 @@ local Rows = {}
 
 local function text(rows, style, key, ...)
     rows[#rows + 1] = { style = style, key = key, args = { ... } }
+end
+
+-- Up to MAX_NOTES rows from list, then a count of the rest.
+local function capped(rows, list, row)
+    for i, item in ipairs(list) do
+        if i > Parse.MAX_NOTES then
+            text(rows, "note", "UI_Prepackaged_DetailMore", #list - Parse.MAX_NOTES)
+            return
+        end
+        rows[#rows + 1] = row(item)
+    end
 end
 
 local function modified(bind)
@@ -83,13 +96,9 @@ local function label(item)
 end
 
 local function reasons(rows, list, style, lines)
-    for i, item in ipairs(list) do
-        if i > Parse.MAX_NOTES then
-            text(rows, "note", "UI_Prepackaged_DetailMore", #list - Parse.MAX_NOTES)
-            return
-        end
-        rows[#rows + 1] = { style = style, line = lines and item.line or nil, key = "UI_Prepackaged_Reason_" .. item.reason, args = { label(item), unpack(item.args) } }
-    end
+    capped(rows, list, function(item)
+        return { style = style, line = lines and item.line or nil, key = "UI_Prepackaged_Reason_" .. item.reason, args = { label(item), unpack(item.args) } }
+    end)
 end
 
 local function blocked(rows, review)
@@ -127,7 +136,43 @@ local function unplaced(rows, check)
     reasons(rows, list, "warning", true)
 end
 
-function Rows.details(entry, state, packConflicts, of, check)
+local REASONS = { missing = "UI_Prepackaged_SandboxMissing", invalid = "UI_Prepackaged_SandboxInvalid", hidden = "UI_Prepackaged_SandboxHidden",
+    lost = "UI_Prepackaged_SandboxLost" }
+
+local function unused(rows, sorted, style)
+    for _, status in ipairs({ "missing", "invalid", "hidden", "lost" }) do
+        capped(rows, sorted[status] or {}, function(e)
+            return { style = style, line = e.line, key = REASONS[status], args = { Sandbox.line(e) } }
+        end)
+    end
+end
+
+-- sandbox: missing, the part of the sandbox screen the game lacks; sorted, the lines as the game loaded now takes them;
+-- inUse and record, the preset Pack <id> of the pack in use.
+local function sandboxDetails(rows, pack, sandbox)
+    text(rows, "text", "UI_Prepackaged_DetailSandbox", #pack.sandbox)
+    if sandbox.missing ~= nil then
+        text(rows, "alert", "UI_Prepackaged_DetailSandboxFeature", sandbox.missing)
+    end
+    local name = Sandbox.presetName(pack)
+    local record = sandbox.record
+    if not sandbox.inUse then
+        text(rows, "note", "UI_Prepackaged_DetailSandboxUse", name)
+    elseif record ~= nil and record.version == pack.version and record.status == "written" then
+        text(rows, "note", "UI_Prepackaged_DetailPresetWritten", name, pack.version)
+    elseif record ~= nil and record.version == pack.version then
+        text(rows, "note", "UI_Prepackaged_DetailPresetKept", name)
+    else
+        text(rows, "note", "UI_Prepackaged_DetailPresetWaiting", name)
+    end
+    local sorted = sandbox.sorted
+    if sorted ~= nil and #sorted.missing + #sorted.invalid > 0 then
+        text(rows, "section", "UI_Prepackaged_DetailSandboxUnplaced", #sorted.missing + #sorted.invalid)
+        unused(rows, sorted, "warning")
+    end
+end
+
+function Rows.details(entry, state, packConflicts, of, check, sandbox)
     local result, rows = entry.result, {}
     local pack = result.pack
     local name = Rows.name(pack)
@@ -151,6 +196,9 @@ function Rows.details(entry, state, packConflicts, of, check)
     end
     if pack.map ~= nil then
         text(rows, "text", "UI_Prepackaged_DetailMap", pack.map)
+    end
+    if #pack.sandbox > 0 and sandbox ~= nil then
+        sandboxDetails(rows, pack, sandbox)
     end
     local use = Rows.use(pack, state)
     if use ~= nil then
@@ -180,6 +228,36 @@ local function title(rows, plan, pack, state, name)
     if Version.compare(pack.version, state.applied, 1) > 0 then
         text(rows, "alert", "UI_Prepackaged_ReviewMajor")
     end
+end
+
+-- Sandbox settings belong to a world or a server, not to the game, so the review only tells of them and of what the
+-- version in use set differently.
+local function sandboxReview(rows, plan, pack, state)
+    local diff = plan.update and state.applied ~= nil and Sandbox.diff(state.sandbox, pack.sandbox)
+    if #pack.sandbox == 0 and not (diff and #diff.removed > 0) then
+        return
+    end
+    text(rows, "section", "UI_Prepackaged_ReviewSandbox", #pack.sandbox)
+    text(rows, "note", "UI_Prepackaged_ReviewSandboxWorld", Sandbox.presetName(pack))
+    if not diff then
+        return
+    end
+    local changes = {}
+    for _, c in ipairs(diff.changed) do
+        changes[#changes + 1] = { key = "UI_Prepackaged_ReviewSandboxChanged", args = { c.name, c.from, c.to } }
+    end
+    for _, c in ipairs(diff.added) do
+        changes[#changes + 1] = { key = "UI_Prepackaged_ReviewSandboxAdded", args = { c.name, c.to } }
+    end
+    for _, c in ipairs(diff.removed) do
+        changes[#changes + 1] = { key = "UI_Prepackaged_ReviewSandboxRemoved", args = { c.name, c.from } }
+    end
+    if #changes == 0 then
+        text(rows, "note", "UI_Prepackaged_ReviewSandboxSame", state.applied)
+        return
+    end
+    text(rows, "text", "UI_Prepackaged_ReviewSandboxChanges", #changes, state.applied)
+    capped(rows, changes, function(c) return { style = "item", key = c.key, args = c.args } end)
 end
 
 function Rows.review(plan, pack, state, names)
@@ -231,6 +309,7 @@ function Rows.review(plan, pack, state, names)
     elseif plan.mapsChanged then
         text(rows, "note", "UI_Prepackaged_ReviewMapOrderCleared")
     end
+    sandboxReview(rows, plan, pack, state)
     if not plan.changed then
         text(rows, "note", "UI_Prepackaged_ReviewNoChange")
         return rows
@@ -310,6 +389,12 @@ function Rows.defaults(review, ticks, clashes, names)
 end
 
 function Rows.backupTitle(backup)
+    if backup.kind == "server" then
+        if backup.before.kind == "host" then
+            return { key = "UI_Prepackaged_ServerBackupBeforePack", args = { backup.name, backup.before.id, backup.before.version } }
+        end
+        return { key = "UI_Prepackaged_ServerBackupBeforeRestore", args = { backup.name, backup.before.n } }
+    end
     if backup.kind == "files" then
         if backup.n == 1 then
             return { key = "UI_Prepackaged_FilesFirst", args = {} }
@@ -327,6 +412,9 @@ function Rows.backupTitle(backup)
 end
 
 function Rows.backupDetail(backup)
+    if backup.kind == "server" then
+        return { key = "UI_Prepackaged_ServerBackupDetail", args = { backup.n, backup.date } }
+    end
     if backup.kind == "files" then
         return { key = "UI_Prepackaged_FilesDetail", args = { backup.n, backup.date } }
     end
@@ -339,6 +427,12 @@ function Rows.backup(backup, of)
     text(rows, "title", head.key, unpack(head.args))
     local detail = Rows.backupDetail(backup)
     text(rows, "text", detail.key, unpack(detail.args))
+    if backup.kind == "server" then
+        text(rows, "text", "UI_Prepackaged_ServerBackupIni", backup.name, #backup.ini)
+        text(rows, "text", "UI_Prepackaged_ServerBackupSandbox", backup.name, #backup.sandbox)
+        text(rows, "note", "UI_Prepackaged_ServerBackupRestore")
+        return rows
+    end
     if backup.kind == "files" then
         text(rows, "text", "UI_Prepackaged_FilesKeys", #backup.keys)
         text(rows, "text", "UI_Prepackaged_FilesOptions", #backup.options)
@@ -367,6 +461,129 @@ function Rows.backup(backup, of)
         text(rows, "alert", "UI_Prepackaged_RestoreWithout")
     end
     text(rows, "note", "UI_Prepackaged_RestoreBackup")
+    return rows
+end
+
+-- A dialog doesn't wrap or scroll, so it lists this many lines of a kind.
+local DIALOG_LINES = 10
+
+local function say(lines, key, ...)
+    lines[#lines + 1] = { key = key, args = { ... } }
+end
+
+local function listed(lines, sorted, statuses)
+    local count = 0
+    for _, status in ipairs(statuses) do
+        for _, e in ipairs(sorted[status]) do
+            count = count + 1
+            if count <= DIALOG_LINES then
+                say(lines, REASONS[status], Sandbox.line(e))
+            end
+        end
+    end
+    if count > DIALOG_LINES then
+        say(lines, "UI_Prepackaged_DialogMore", count - DIALOG_LINES)
+    end
+end
+
+-- The dialog after Apply pack on the sandbox screen.
+function Rows.sandboxApplied(result)
+    local lines, sorted = {}, result.sorted
+    say(lines, "UI_Prepackaged_SandboxApplied", Rows.name(result.pack), result.pack.version, #sorted.changed, #sorted.same)
+    listed(lines, sorted, { "missing", "invalid", "hidden" })
+    say(lines, "UI_Prepackaged_SandboxCheck")
+    return lines
+end
+
+-- What setting up a server will do, asked before anything is written. check.exists: the preset's files already there.
+function Rows.hostAsk(job, check)
+    local lines = {}
+    if job.before.kind == "pack" then
+        say(lines, "UI_Prepackaged_HostAsk", job.name, job.title, job.before.version)
+    else
+        say(lines, "UI_Prepackaged_HostAskRestore", job.name, job.before.n)
+    end
+    for _, f in ipairs(Server.files(job.name, check.exists)) do
+        say(lines, f.key, unpack(f.args))
+    end
+    if job.before.kind == "pack" then
+        say(lines, "UI_Prepackaged_HostAskPack", #job.sandbox)
+    else
+        say(lines, "UI_Prepackaged_HostAskBackup", #job.ini, #job.sandbox)
+    end
+    if job.existing then
+        say(lines, "UI_Prepackaged_HostAskSaved")
+    end
+    if job.reload then
+        say(lines, "UI_Prepackaged_HostAskReload")
+    end
+    if job.memory ~= nil then
+        say(lines, "UI_Prepackaged_HostAskMemory", job.memory)
+    end
+    say(lines, "UI_Prepackaged_HostAskGo")
+    return lines
+end
+
+-- The dialog once the preset is saved, or why it isn't.
+function Rows.hosted(job)
+    local lines = {}
+    if job.error ~= nil then
+        say(lines, job.error, job.name, job.detail)
+        return lines
+    end
+    say(lines, "UI_Prepackaged_HostDone", job.name, #job.set)
+    local sorted = { missing = Sandbox.entries(job.missing), invalid = Sandbox.entries(job.invalid), lost = Sandbox.entries(job.lost) }
+    listed(lines, sorted, { "missing", "invalid", "lost" })
+    if job.backup ~= nil then
+        say(lines, "UI_Prepackaged_HostBackup", job.backup)
+    end
+    return lines
+end
+
+-- Longer lines are cut in the window: the clipboard and the file hold them whole.
+local CLIP = 120
+
+local function clip(line)
+    if #line > CLIP then
+        return string.sub(line, 1, CLIP) .. "..."
+    end
+    return line
+end
+
+local LEFT = { Version = "UI_Prepackaged_ServerLeftVersion", Group = "UI_Prepackaged_ServerLeftGroup" }
+
+-- info: pack, text (the lines as copied), path, typed and untyped counts, invalid and left (Sandbox.lua) entries,
+-- hostMissing, reload and memory.
+function Rows.server(info)
+    local rows, pack = {}, info.pack
+    text(rows, "title", "UI_Prepackaged_ServerHead", Rows.name(pack), pack.version)
+    text(rows, "section", "UI_Prepackaged_ServerHostHead")
+    text(rows, "note", "UI_Prepackaged_ServerHostHow")
+    if info.hostMissing ~= nil then
+        text(rows, "alert", "UI_Prepackaged_ServerHostFeature", info.hostMissing)
+    end
+    if info.reload then
+        text(rows, "note", "UI_Prepackaged_ServerReload")
+    end
+    if info.memory ~= nil then
+        text(rows, "text", "UI_Prepackaged_ServerMemory", info.memory)
+    end
+    text(rows, "section", "UI_Prepackaged_ServerLinesHead")
+    text(rows, "note", "UI_Prepackaged_ServerLinesHow", info.path)
+    text(rows, "text", "UI_Prepackaged_ServerLinesCount", #pack.workshopItems, #pack.mods, info.typed + info.untyped)
+    if info.untyped > 0 then
+        text(rows, "note", "UI_Prepackaged_ServerUntyped", info.untyped)
+    end
+    local left = #info.invalid + #info.left
+    if left > 0 then
+        text(rows, "section", "UI_Prepackaged_ServerLeft", left)
+        capped(rows, info.invalid, function(e) return { style = "warning", line = e.line, key = REASONS.invalid, args = { Sandbox.line(e) } } end)
+        capped(rows, info.left, function(l)
+            return { style = "warning", line = l.entry.line, key = LEFT[l.reason], args = { Sandbox.line(l.entry) } }
+        end)
+    end
+    text(rows, "section", "UI_Prepackaged_ServerPreview", #info.text)
+    capped(rows, info.text, function(line) return { style = "code", text = clip(line) } end)
     return rows
 end
 

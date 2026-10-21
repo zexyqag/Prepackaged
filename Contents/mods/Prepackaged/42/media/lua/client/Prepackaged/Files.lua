@@ -103,12 +103,20 @@ function Files.fileBackups()
     return backups(Backup.FILES, Backup.decodeFiles)
 end
 
+function Files.serverBackups()
+    return backups(Backup.SERVERS, Backup.decodeServer)
+end
+
 function Files.saveBackup(backup)
     return Files.write(Backup.path(Backup.FOLDER, backup.n), Backup.encode(backup))
 end
 
 function Files.saveFileBackup(backup)
     return Files.write(Backup.path(Backup.FILES, backup.n), Backup.encodeFiles(backup))
+end
+
+function Files.saveServerBackup(backup)
+    return Files.write(Backup.path(Backup.SERVERS, backup.n), Backup.encodeServer(backup))
 end
 
 -- The old file is copied first: a failed rewrite would lose every preset in it.

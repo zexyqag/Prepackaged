@@ -1,3 +1,4 @@
+local Sandbox = require "Prepackaged/Sandbox"
 local Text = require "Prepackaged/Text"
 local Version = require "Prepackaged/Version"
 
@@ -7,12 +8,13 @@ State.FILE = "Prepackaged/state.txt"
 State.FORMAT = 1
 local DECISIONS = { applied = true, declined = true, same = true }
 
--- unknown keeps lines a newer Prepackaged wrote, so this one writes them back.
+-- unknown keeps lines a newer Prepackaged wrote, so this one writes them back. sandbox holds the pack's @sandbox lines
+-- as Name=value, for what an update changes.
 function State.new()
-    return { mods = {}, ledger = {}, at = {}, entries = {}, unknown = {} }
+    return { mods = {}, sandbox = {}, ledger = {}, at = {}, entries = {}, unknown = {} }
 end
 
-local KNOWN = { format = true, current = true, source = true, applied = true, mod = true }
+local KNOWN = { format = true, current = true, source = true, applied = true, mod = true, sandbox = true }
 
 local function entry(kind, key)
     return kind .. "\n" .. key
@@ -103,6 +105,8 @@ function State.decode(lines)
             state.applied = f[2]
         elseif kind == "mod" and #f >= 2 and Text.after(line, 1) ~= "" then
             state.mods[#state.mods + 1] = Text.after(line, 1)
+        elseif kind == "sandbox" and #f >= 2 and string.find(Text.after(line, 1), "=", 2, true) then
+            state.sandbox[#state.sandbox + 1] = Text.after(line, 1)
         end
     end
     return state
@@ -122,6 +126,9 @@ function State.encode(state)
     for _, id in ipairs(state.mods) do
         lines[#lines + 1] = "mod|" .. id
     end
+    for _, line in ipairs(state.sandbox) do
+        lines[#lines + 1] = "sandbox|" .. line
+    end
     for _, r in ipairs(state.ledger) do
         local head = r.kind .. "|" .. r.pack .. "|" .. r.decision .. "|" .. r.asked .. "|" .. (r.applied or "") .. "|"
         lines[#lines + 1] = head .. r.key
@@ -136,15 +143,21 @@ end
 function State.pack(state)
     local pack = State.new()
     pack.current, pack.source, pack.applied, pack.mods = state.current, state.source, state.applied, Text.copy(state.mods)
+    pack.sandbox = Text.copy(state.sandbox)
     return pack
 end
 
 function State.setPack(state, pack)
     state.current, state.source, state.applied, state.mods = pack.current, pack.source, pack.applied, Text.copy(pack.mods)
+    state.sandbox = Text.copy(pack.sandbox)
 end
 
 function State.record(state, pack, source, mods)
-    State.setPack(state, { current = pack.id, source = source, applied = pack.version, mods = mods })
+    local sandbox = {}
+    for i, entry in ipairs(pack.sandbox) do
+        sandbox[i] = Sandbox.line(entry)
+    end
+    State.setPack(state, { current = pack.id, source = source, applied = pack.version, mods = mods, sandbox = sandbox })
 end
 
 return State

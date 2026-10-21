@@ -19,6 +19,17 @@ function Enable.status(id)
     return "ok"
 end
 
+-- Every mod of the list that can load is loaded now, so their sandbox options exist.
+function Enable.loaded(mods)
+    for _, id in ipairs(mods) do
+        local info = getModInfoByID(id)
+        if info ~= nil and info:isAvailable() and not isModActive(info) then
+            return false
+        end
+    end
+    return true
+end
+
 function Enable.nameOf(id)
     local info = getModInfoByID(id)
     return info and info:getName()

@@ -2,6 +2,7 @@ require "ISUI/ISPanel"
 local Backup = require "Prepackaged/Backup"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
+local Host = require "Prepackaged/Host"
 local Rows = require "Prepackaged/Rows"
 local Settings = require "Prepackaged/Settings"
 local Widgets = require "Prepackaged/UI/Widgets"
@@ -53,7 +54,7 @@ function RestoreWindow:prerender()
 end
 
 function RestoreWindow:refresh()
-    for _, backup in ipairs(Backup.merge(Files.backups(), Files.fileBackups())) do
+    for _, backup in ipairs(Backup.merge(Backup.merge(Files.backups(), Files.fileBackups()), Files.serverBackups())) do
         local head, detail = Rows.backupTitle(backup), Rows.backupDetail(backup)
         local data = { backup = backup, title = getText(head.key, unpack(head.args)), detail = getText(detail.key, unpack(detail.args)) }
         self.list:addItem(data.title, data)
@@ -72,18 +73,27 @@ function RestoreWindow:onSelect(data)
     self.restoreButton:setEnable(self.backup ~= nil)
 end
 
-function RestoreWindow:close()
+function RestoreWindow:close(job)
     self:setVisible(false)
     self:removeFromUIManager()
-    self.owner:onRestoreClosed()
+    self.owner:onRestoreClosed(job)
 end
 
 function RestoreWindow:onBack()
     self:close()
 end
 
+-- A server preset goes back the way it was set up, with the same list of what changes.
 function RestoreWindow:onRestore()
-    if self.backup.kind == "files" then
+    if self.backup.kind == "server" then
+        local check, problem = Host.prepare(self.backup.name)
+        if check == nil then
+            Widgets.tell({ problem })
+            return
+        end
+        self.job = Host.restoreJob(self.backup, check)
+        Widgets.ask(Widgets.lines(Rows.hostAsk(self.job, check)), self, self.commit)
+    elseif self.backup.kind == "files" then
         Widgets.ask({ getText("UI_Prepackaged_AskRestoreFiles"), getText("UI_Prepackaged_AskRestoreFilesBackup") }, self, self.commit)
     else
         Widgets.ask({ getText("UI_Prepackaged_AskRestore", #self.backup.mods), getText("UI_Prepackaged_AskRestoreBackup") }, self, self.commit)
@@ -92,7 +102,9 @@ end
 
 function RestoreWindow:commit()
     local result
-    if self.backup.kind == "files" then
+    if self.backup.kind == "server" then
+        result = Host.start(self.job, self.state)
+    elseif self.backup.kind == "files" then
         result = Settings.restore(self.backup)
     else
         result = Enable.restore(self.backup, self.state)
@@ -100,7 +112,7 @@ function RestoreWindow:commit()
     if result.reloaded then
         return
     end
-    self:close()
+    self:close(result.job)
     if result.error ~= nil then
         Widgets.tell({ getText(result.error, unpack(result.args)) })
     end

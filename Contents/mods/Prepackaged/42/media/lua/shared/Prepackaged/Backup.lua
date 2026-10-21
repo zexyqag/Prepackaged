@@ -6,6 +6,8 @@ local Backup = {}
 Backup.FOLDER = "Prepackaged/backups"
 -- keysB42.ini and ModOptions.ini, as copies taken before Prepackaged writes them.
 Backup.FILES = Backup.FOLDER .. "/binds"
+-- Server presets as the game reads them, before Prepackaged sets one up or restores one.
+Backup.SERVERS = Backup.FOLDER .. "/servers"
 -- Each file is a few KB, and 20 cover months of weekly pack updates. Lua can't delete files, so the backups after the
 -- first take turns in this many files.
 Backup.KEEP = 20
@@ -28,7 +30,7 @@ end
 local function head(backup)
     local lines = { "backup|" .. tostring(backup.n) .. "|" .. backup.date }
     local before = backup.before
-    if before.kind == "pack" or before.kind == "defaults" then
+    if before.kind == "pack" or before.kind == "defaults" or before.kind == "host" then
         lines[#lines + 1] = "before|" .. before.kind .. "|" .. before.id .. "|" .. before.version
     else
         lines[#lines + 1] = "before|restore|" .. tostring(before.n)
@@ -116,6 +118,39 @@ function Backup.decodeFiles(lines)
         end
     end
     if not complete(backup) then
+        return nil
+    end
+    return backup
+end
+
+-- Every server option and every sandbox option the game has loaded, as Name=value.
+function Backup.encodeServer(backup)
+    local lines = head(backup)
+    lines[#lines + 1] = "server|" .. backup.name
+    for _, line in ipairs(backup.ini) do
+        lines[#lines + 1] = "ini|" .. line
+    end
+    for _, line in ipairs(backup.sandbox) do
+        lines[#lines + 1] = "sandbox|" .. line
+    end
+    return lines
+end
+
+function Backup.decodeServer(lines)
+    local backup = { kind = "server", ini = {}, sandbox = {} }
+    for _, line in ipairs(lines) do
+        local f = Text.split(line, "|")
+        if not readHead(backup, line, f, "host") then
+            if f[1] == "server" and #f >= 2 and Text.after(line, 1) ~= "" then
+                backup.name = Text.after(line, 1)
+            elseif f[1] == "ini" and #f >= 2 then
+                backup.ini[#backup.ini + 1] = Text.after(line, 1)
+            elseif f[1] == "sandbox" and #f >= 2 then
+                backup.sandbox[#backup.sandbox + 1] = Text.after(line, 1)
+            end
+        end
+    end
+    if not complete(backup) or backup.name == nil then
         return nil
     end
     return backup

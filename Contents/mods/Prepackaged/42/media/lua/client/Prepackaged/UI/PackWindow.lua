@@ -6,6 +6,8 @@ local Files = require "Prepackaged/Files"
 local RestoreWindow = require "Prepackaged/UI/RestoreWindow"
 local ReviewWindow = require "Prepackaged/UI/ReviewWindow"
 local Rows = require "Prepackaged/Rows"
+local SandboxScreen = require "Prepackaged/SandboxScreen"
+local ServerWindow = require "Prepackaged/UI/ServerWindow"
 local Settings = require "Prepackaged/Settings"
 local SubscriptionsWindow = require "Prepackaged/UI/SubscriptionsWindow"
 local Widgets = require "Prepackaged/UI/Widgets"
@@ -19,6 +21,21 @@ local PackWindow = ISPanel:derive("PrepackagedPackWindow")
 
 local function size(total, fraction, minimum)
     return math.floor(math.min(total - UI_BORDER_SPACING * 2, math.max(minimum, total * fraction)))
+end
+
+-- The bottom row from the left, as field, text and handler; Use stays at the right.
+local LEFT = { { "backButton", "UI_btn_back", "onBack" }, { "pasteButton", "UI_Prepackaged_Paste", "onPaste" },
+    { "restoreButton", "UI_Prepackaged_Restore", "onRestore" }, { "defaultsButton", "UI_Prepackaged_Defaults", "onDefaults" },
+    { "subscriptionsButton", "UI_Prepackaged_Subscriptions", "onSubscriptions" }, { "serverButton", "UI_Prepackaged_Server", "onServer" } }
+local RIGHT = { "UI_Prepackaged_Use", "UI_Prepackaged_Update" }
+
+-- At least as wide as its row of buttons.
+local function minimumWidth()
+    local width = Widgets.width(RIGHT) + UI_BORDER_SPACING * 2
+    for _, b in ipairs(LEFT) do
+        width = width + Widgets.width({ b[2] }) + UI_BORDER_SPACING
+    end
+    return math.max(800, width)
 end
 
 function PackWindow:new(x, y, width, height, onClose)
@@ -46,13 +63,13 @@ function PackWindow:createChildren()
     self.details:instantiate()
     self:addChild(self.details)
 
-    self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_btn_back") }, self.onBack)
+    local x = UI_BORDER_SPACING
+    for _, b in ipairs(LEFT) do
+        self[b[1]] = Widgets.button(self, x, bottom, { getText(b[2]) }, self[b[3]])
+        x = self[b[1]]:getRight() + UI_BORDER_SPACING
+    end
     self.backButton:enableCancelColor()
-    self.pasteButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Paste") }, self.onPaste)
-    self.restoreButton = Widgets.button(self, self.pasteButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Restore") }, self.onRestore)
-    self.defaultsButton = Widgets.button(self, self.restoreButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Defaults") }, self.onDefaults)
-    self.subscriptionsButton = Widgets.button(self, self.defaultsButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Subscriptions") }, self.onSubscriptions)
-    self.useButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Use"), getText("UI_Prepackaged_Update") }, self.onUse)
+    self.useButton = Widgets.button(self, 0, bottom, { getText(RIGHT[1]), getText(RIGHT[2]) }, self.onUse)
     self.useButton:setX(self.width - UI_BORDER_SPACING - self.useButton.width)
     self.useButton:enableAcceptColor()
     self:refresh()
@@ -136,13 +153,16 @@ function PackWindow:onSelect(data)
         self.details:setRows({ { style = "note", key = "UI_Prepackaged_NoPacks", args = {} } })
         self.useButton:setEnable(false)
         self.subscriptionsButton:setEnable(false)
+        self.serverButton:setEnable(false)
         return
     end
     local pack = self.entry.result.pack
     self.subscriptionsButton:setEnable(#pack.workshopItems + #pack.collection + #pack.collections > 0)
     local ok, check = pcall(Settings.check, self.entry)
-    self.details:setRows(Rows.details(self.entry, self.state, Enable.packConflicts(self.entry), Enable.nameOf, ok and check or nil))
+    local okSandbox, sandbox = pcall(SandboxScreen.check, self.entry, self.state)
+    self.details:setRows(Rows.details(self.entry, self.state, Enable.packConflicts(self.entry), Enable.nameOf, ok and check or nil, okSandbox and sandbox or nil))
     self.useButton:setEnable(#self.entry.result.errors == 0)
+    self.serverButton:setEnable(#self.entry.result.errors == 0)
     self.useButton:setTitle(getText(Discovery.isUpdate(self.entry, self.state) and "UI_Prepackaged_Update" or "UI_Prepackaged_Use"))
 end
 
@@ -173,6 +193,7 @@ function PackWindow:onReviewClosed(applied)
     self:setVisible(true)
     if applied then
         self.pasted = nil
+        pcall(SandboxScreen.ensurePreset)
         self:refresh()
         self:offerDefaults()
     else
@@ -215,12 +236,31 @@ function PackWindow:onSubscriptionsClosed()
     self:setVisible(true)
 end
 
+function PackWindow:onServer()
+    self:setVisible(false)
+    ServerWindow.open(self, self.entry)
+end
+
+-- A server set up without a reload: the Host screen shows it, in place of this window.
+function PackWindow:onServerClosed(job)
+    if job == nil then
+        self:setVisible(true)
+        return
+    end
+    self:onBack()
+    ServerWindow.finished(job)
+end
+
 function PackWindow:onRestore()
     self:setVisible(false)
     RestoreWindow.open(self, self.state)
 end
 
-function PackWindow:onRestoreClosed()
+function PackWindow:onRestoreClosed(job)
+    if job ~= nil then
+        self:onServerClosed(job)
+        return
+    end
     self:setVisible(true)
     self:refresh(self.entry)
 end
@@ -249,7 +289,7 @@ function PackWindow.open(onClose)
         return
     end
     local screenW, screenH = getCore():getScreenWidth(), getCore():getScreenHeight()
-    local width, height = size(screenW, 0.6, 800), size(screenH, 0.7, 500)
+    local width, height = size(screenW, 0.6, minimumWidth()), size(screenH, 0.7, 500)
     local window = PackWindow:new((screenW - width) / 2, (screenH - height) / 2, width, height, onClose)
     window:initialise()
     window:addToUIManager()

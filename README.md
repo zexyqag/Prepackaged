@@ -2,7 +2,7 @@
 
 A Project Zomboid Build 42 mod that turns a mod pack into a guided setup. A pack author ships one small pack file; Prepackaged finds it and enables the pack's mods in the pack's load order, after a review of every change.
 
-> **Status: in development.** Pack discovery, mod enabling, the key bind and mod option defaults and the subscription helper exist so far. The pack format may still change.
+> **Status: in development.** Pack discovery, mod enabling, the key bind and mod option defaults, the subscription helper, sandbox settings and server setup exist so far. The pack format may still change.
 
 ## Using a pack
 
@@ -21,6 +21,10 @@ Using a pack replaces your mod list. Mods you add afterwards are yours: when the
 **Restore** in the Prepackaged window lists the backups with their date, and puts one back after backing up what is in use: a mod list in its exact order, or your key binds and mod options. What you had before Prepackaged first changed it is kept for good; of the others, the newest 20 of each kind are kept, in `Zomboid/Lua/Prepackaged/backups` (key binds and mod options in its `binds` folder).
 
 A pack's key binds and mod options are suggestions, never forced. After Apply, a review shows them in sections (key binds, then each mod's options) as your value and the pack's value, and changes only the rows you tick. A tick starts on where you have the game's default or a value Prepackaged set, for this pack or another; a value you keep by unticking is yours from then on. The review also lists keys that end up on more than one action, and entries of mods that aren't loaded, which wait for the next start. What you untick isn't asked again until the pack changes it, and **Defaults** in the Prepackaged window shows the review again, with every entry if you like. `keysB42.ini` and `ModOptions.ini` are backed up first, the same way as the mod list, and Restore puts them back.
+
+A pack's sandbox settings belong to a world or a server, so using a pack changes none of them: the review lists them, and on an update what changed. On the New Game sandbox screen, **Apply pack** puts them into the screen's settings, which you can still change before Next, and lists the lines it couldn't use. The sandbox preset `Pack <id>` holds them too. Prepackaged writes it once per pack version while the pack's mods are loaded, and leaves it as it is once you save changes of your own over it.
+
+**Server** in the Prepackaged window, for the selected pack: **Copy server lines** puts the `WorkshopItems`, `Mods` and `Map` lines for a dedicated server's `.ini`, and the lines to add to the end of its `_SandboxVars.lua`, on the clipboard and in `Zomboid/Lua/Prepackaged/server/<id>.txt`. **Set up a server** makes or changes a server preset in `Zomboid/Server` for Host and opens the Host screen with it, after listing every file it changes. A preset it changes is backed up first, and Restore puts it back. When the pack's mods aren't all loaded, the game reloads its mods with them, so their sandbox settings exist, then with your own list again.
 
 ## Pack file format
 
@@ -62,7 +66,7 @@ ExampleMap = Map: Example Town
 3000000002 = Maps | 3000000103
 ```
 
-`@sandbox` and `@locks` are read and checked already; applying them comes in later versions.
+`@locks` is read and checked already; using it comes in a later version.
 
 ## Publishing
 
