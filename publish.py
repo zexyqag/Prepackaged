@@ -4,7 +4,7 @@ anything to publish, the change log as release notes (Markdown) and as the Steam
 uploaded mod.info files.
 
     python3 publish.py latest RELEASES
-    python3 publish.py plan --since TAG --commits FILE
+    python3 publish.py plan --since TAG --commits FILE      (TAG empty: the first release)
     python3 publish.py notes --out FILE --commits FILE [--notes TEXT]
     python3 publish.py steam --notes FILE --version VERSION --url URL --out FILE
     python3 publish.py modversion --version VERSION FOLDER
@@ -95,12 +95,13 @@ def parse_commit(subject, body):
 
 
 def commits_since(tag):
-    """The commits since tag, oldest first, merges left out: the commits they merge are counted."""
-    if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}", check=False).returncode != 0:
+    """The commits since tag, or all of them for no tag, oldest first, merges left out: the commits they merge are
+    counted."""
+    if tag and git("rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}", check=False).returncode != 0:
         raise Failure(f"the tag {tag} isn't in this checkout: it needs the full history (fetch-depth: 0)")
-    if git("merge-base", "--is-ancestor", tag, "HEAD", check=False).returncode != 0:
+    if tag and git("merge-base", "--is-ancestor", tag, "HEAD", check=False).returncode != 0:
         raise Failure(f"the latest version, {tag}, isn't in the history of this commit, so the commits since it are unknown")
-    log = git("log", "--no-merges", "--reverse", "--format=%s%x1f%b%x1e", f"{tag}..HEAD").stdout
+    log = git("log", "--no-merges", "--reverse", "--format=%s%x1f%b%x1e", f"{tag}..HEAD" if tag else "HEAD").stdout
     commits = []
     for record in log.split("\x1e"):
         fields = record.strip("\n").split("\x1f")
@@ -123,20 +124,26 @@ def bump(version, level):
     return f"{major}.{minor}.{patch + 1}"
 
 
-def next_version(latest_version, commits):
-    """The version the commits make: the highest Release-As, else the bump of their highest level; None when no commit
-    is releasable."""
+def release_as(commits, latest_version=None):
+    """The highest Release-As of the commits, each above latest_version if there is one; None when none has one."""
     explicit = []
     for commit in commits:
         for value in commit["release_as"]:
             if not VERSION.fullmatch(value):
                 raise Failure(f"the commit '{commit['subject']}' has Release-As: {value}, which is not MAJOR.MINOR.PATCH")
-            if parts(value) <= parts(latest_version):
+            if latest_version is not None and parts(value) <= parts(latest_version):
                 raise Failure(f"the commit '{commit['subject']}' has Release-As: {value}, which is not higher than the latest version, "
                               f"{latest_version}")
             explicit.append(value)
+    return max(explicit, key=parts, default=None)
+
+
+def next_version(latest_version, commits):
+    """The version the commits make: the highest Release-As, else the bump of their highest level; None when no commit
+    is releasable."""
+    explicit = release_as(commits, latest_version)
     if explicit:
-        return max(explicit, key=parts)
+        return explicit
     level = level_of(commits)
     return None if level == "none" else bump(latest_version, level)
 
@@ -160,8 +167,24 @@ def page_changed(since):
     return before != page(Path("workshop.txt").read_text(encoding="utf-8")) or bool(changed(since, ["preview.png"]))
 
 
+def first_release():
+    """With no version yet, the first release takes the highest Release-As of all the commits, which it needs."""
+    commits = commits_since(None)
+    version = release_as(commits)
+    if version is None:
+        raise Failure("there is no vMAJOR.MINOR.PATCH release or tag yet, so the first release takes its version from a "
+                      "Release-As footer: add one such as Release-As: 0.1.0 to a commit message and run Publish again")
+    if not git("ls-files", "--", "Contents/").stdout.strip():
+        raise Failure("there is nothing under Contents/ to release")
+    print(f"No version yet: the first release is {version}, from its Release-As, with the {len(commits)} commits so far.")
+    return "release", version, commits
+
+
 def plan(since):
-    """release when a commit is releasable and Contents/ changed, page when only the Workshop page did, else none."""
+    """release when a commit is releasable and Contents/ changed, page when only the Workshop page did, else none. With
+    no version yet (since empty), the first release."""
+    if not since:
+        return first_release()
     commits = commits_since(since)
     version = next_version(since[1:], commits)
     files = changed(since, ["Contents/"])
@@ -310,8 +333,9 @@ def main():
         releases = [json.loads(line) for line in args.releases.read_text(encoding="utf-8").splitlines() if line.strip()]
         found = latest(releases, git("tag", "--list").stdout.splitlines())
         if found is None:
-            raise Failure("there is no vMAJOR.MINOR.PATCH release or tag yet, so the version to start from is unknown: tag the commit "
-                          "that is on the Workshop with its version (git tag vX.Y.Z <commit>, then git push origin vX.Y.Z) and run Publish again")
+            print("There is no vMAJOR.MINOR.PATCH release or tag yet: the first release takes its version from a Release-As footer.")
+            output(tag="", version="", pending="false")
+            return
         if not found["release"]:
             print(f"No release has a vMAJOR.MINOR.PATCH tag yet, so the latest version is the tag {found['tag']}.")
         elif found["prerelease"]:
