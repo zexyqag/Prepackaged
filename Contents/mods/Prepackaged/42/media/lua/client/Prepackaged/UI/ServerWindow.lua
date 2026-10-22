@@ -76,8 +76,14 @@ function ServerWindow:onCopy()
     end
 end
 
+-- The box asks on every frame (ISTextBox.updateButtons), so each text is checked once, and OK's tooltip says why not.
 function ServerWindow:isValidName(text)
-    return Host.prepare(text) ~= nil
+    if self.named ~= text then
+        local check, problem = Host.prepare(text)
+        self.named, self.nameOk = text, check ~= nil
+        self.nameBox:setValidateTooltipText(problem)
+    end
+    return self.nameOk
 end
 
 function ServerWindow:onHost()
@@ -88,6 +94,7 @@ function ServerWindow:onHost()
     modal:initialise()
     modal:setAlwaysOnTop(true)
     modal:setCapture(true)
+    self.nameBox = modal
     modal:setValidateFunction(self, self.isValidName)
     modal:addToUIManager()
     modal:bringToTop()

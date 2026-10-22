@@ -75,9 +75,9 @@ function SandboxScreen.apply(screen)
     end
     local pack = entry.result.pack
     if not applied then
-        return { error = "UI_Prepackaged_SandboxUpdate", args = { Rows.name(pack), pack.version, state.applied } }
+        return { error = "UI_Prepackaged_SandboxUpdate", args = { Rows.clip(Rows.name(pack)), pack.version, state.applied } }
     elseif #pack.sandbox == 0 then
-        return { error = "UI_Prepackaged_SandboxNone", args = { Rows.name(pack) } }
+        return { error = "UI_Prepackaged_SandboxNone", args = { Rows.clip(Rows.name(pack)) } }
     end
     local missing = SandboxScreen.missing(screen)
     if missing ~= nil then
@@ -235,7 +235,7 @@ end
 function SandboxScreen.check(entry, state)
     local pack = entry.result.pack
     local current, applied = SandboxScreen.current(state)
-    local info = { missing = SandboxScreen.missing(screenOf()), inUse = applied and current.result.pack.id == pack.id }
+    local info = { missing = SandboxScreen.missing(screenOf()), inUse = applied and current.result.pack.id == pack.id, unusable = Enable.unusable(pack.mods) }
     if info.inUse then
         info.record = Sandbox.decodeRecord(Files.read(Sandbox.recordPath(pack)) or {})
     end

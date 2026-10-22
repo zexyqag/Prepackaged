@@ -19,15 +19,26 @@ function Enable.status(id)
     return "ok"
 end
 
--- Every mod of the list that can load is loaded now, so their sandbox options exist.
+-- Every mod of the list that can be used is loaded now, so their sandbox options exist. isAvailable also checks each
+-- require= mod, as the game does before it loads one (ChooseGameInfo.java:620-675).
 function Enable.loaded(mods)
     for _, id in ipairs(mods) do
-        local info = getModInfoByID(id)
-        if info ~= nil and info:isAvailable() and not isModActive(info) then
+        if Enable.status(id) == "ok" and not isModActive(getModInfoByID(id)) then
             return false
         end
     end
     return true
+end
+
+-- The mods of the list the game can't use.
+function Enable.unusable(mods)
+    local ids = {}
+    for _, id in ipairs(mods) do
+        if Enable.status(id) == "unavailable" then
+            ids[#ids + 1] = id
+        end
+    end
+    return ids
 end
 
 function Enable.nameOf(id)

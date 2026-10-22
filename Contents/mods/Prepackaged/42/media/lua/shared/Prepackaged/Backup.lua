@@ -161,7 +161,7 @@ function Backup.sort(list)
     return list
 end
 
--- Both kinds newest first: each in its own order, the two by date, and on the same minute the key binds first.
+-- Two lists newest first: each in its own order, the two by date, and on the same minute the second's first.
 function Backup.merge(mods, files)
     local list, i, j = {}, 1, 1
     while mods[i] ~= nil or files[j] ~= nil do

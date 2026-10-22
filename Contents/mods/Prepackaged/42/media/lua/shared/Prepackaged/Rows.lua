@@ -148,8 +148,8 @@ local function unused(rows, sorted, style)
 end
 
 -- sandbox: missing, the part of the sandbox screen the game lacks; sorted, the lines as the game loaded now takes them;
--- inUse and record, the preset Pack <id> of the pack in use.
-local function sandboxDetails(rows, pack, sandbox)
+-- inUse and record, the preset Pack <id> of the pack in use; unusable, the pack's mods the game can't use.
+local function sandboxDetails(rows, pack, sandbox, of)
     text(rows, "text", "UI_Prepackaged_DetailSandbox", #pack.sandbox)
     if sandbox.missing ~= nil then
         text(rows, "alert", "UI_Prepackaged_DetailSandboxFeature", sandbox.missing)
@@ -169,6 +169,10 @@ local function sandboxDetails(rows, pack, sandbox)
     if sorted ~= nil and #sorted.missing + #sorted.invalid > 0 then
         text(rows, "section", "UI_Prepackaged_DetailSandboxUnplaced", #sorted.missing + #sorted.invalid)
         unused(rows, sorted, "warning")
+    end
+    if #sandbox.unusable > 0 then
+        text(rows, "section", "UI_Prepackaged_ReviewUnavailable", #sandbox.unusable)
+        capped(rows, sandbox.unusable, function(id) return { style = "mod", id = id, name = of and of(id) } end)
     end
 end
 
@@ -198,7 +202,7 @@ function Rows.details(entry, state, packConflicts, of, check, sandbox)
         text(rows, "text", "UI_Prepackaged_DetailMap", pack.map)
     end
     if #pack.sandbox > 0 and sandbox ~= nil then
-        sandboxDetails(rows, pack, sandbox)
+        sandboxDetails(rows, pack, sandbox, of)
     end
     local use = Rows.use(pack, state)
     if use ~= nil then
@@ -233,13 +237,17 @@ end
 -- Sandbox settings belong to a world or a server, not to the game, so the review only tells of them and of what the
 -- version in use set differently.
 local function sandboxReview(rows, plan, pack, state)
-    local diff = plan.update and state.applied ~= nil and Sandbox.diff(state.sandbox, pack.sandbox)
+    local since = plan.update and state.applied
+    local diff = since and state.sandboxed and Sandbox.diff(state.sandbox, pack.sandbox)
     if #pack.sandbox == 0 and not (diff and #diff.removed > 0) then
         return
     end
     text(rows, "section", "UI_Prepackaged_ReviewSandbox", #pack.sandbox)
     text(rows, "note", "UI_Prepackaged_ReviewSandboxWorld", Sandbox.presetName(pack))
-    if not diff then
+    if since and not state.sandboxed then
+        text(rows, "note", "UI_Prepackaged_ReviewSandboxUnknown", since)
+        return
+    elseif not diff then
         return
     end
     local changes = {}
@@ -464,6 +472,18 @@ function Rows.backup(backup, of)
     return rows
 end
 
+-- Longer lines are cut in windows and dialogs: the clipboard and the file hold them whole. A dialog grows to its
+-- longest line from a fixed left edge (ISModalDialog.CalcSize), so a long one would put its button off the screen.
+local CLIP = 120
+
+local function clip(line)
+    if #line > CLIP then
+        return string.sub(line, 1, CLIP) .. "..."
+    end
+    return line
+end
+Rows.clip = clip
+
 -- A dialog doesn't wrap or scroll, so it lists this many lines of a kind.
 local DIALOG_LINES = 10
 
@@ -477,7 +497,7 @@ local function listed(lines, sorted, statuses)
         for _, e in ipairs(sorted[status]) do
             count = count + 1
             if count <= DIALOG_LINES then
-                say(lines, REASONS[status], Sandbox.line(e))
+                say(lines, REASONS[status], clip(Sandbox.line(e)))
             end
         end
     end
@@ -489,7 +509,7 @@ end
 -- The dialog after Apply pack on the sandbox screen.
 function Rows.sandboxApplied(result)
     local lines, sorted = {}, result.sorted
-    say(lines, "UI_Prepackaged_SandboxApplied", Rows.name(result.pack), result.pack.version, #sorted.changed, #sorted.same)
+    say(lines, "UI_Prepackaged_SandboxApplied", clip(Rows.name(result.pack)), result.pack.version, #sorted.changed, #sorted.same)
     listed(lines, sorted, { "missing", "invalid", "hidden" })
     say(lines, "UI_Prepackaged_SandboxCheck")
     return lines
@@ -499,7 +519,7 @@ end
 function Rows.hostAsk(job, check)
     local lines = {}
     if job.before.kind == "pack" then
-        say(lines, "UI_Prepackaged_HostAsk", job.name, job.title, job.before.version)
+        say(lines, "UI_Prepackaged_HostAsk", job.name, clip(job.title), job.before.version)
     else
         say(lines, "UI_Prepackaged_HostAskRestore", job.name, job.before.n)
     end
@@ -516,6 +536,9 @@ function Rows.hostAsk(job, check)
     end
     if job.reload then
         say(lines, "UI_Prepackaged_HostAskReload")
+    end
+    if #job.unusable > 0 then
+        say(lines, "UI_Prepackaged_HostAskUnusable", #job.unusable, clip(table.concat(job.unusable, ", ")))
     end
     if job.memory ~= nil then
         say(lines, "UI_Prepackaged_HostAskMemory", job.memory)
@@ -540,17 +563,7 @@ function Rows.hosted(job)
     return lines
 end
 
--- Longer lines are cut in the window: the clipboard and the file hold them whole.
-local CLIP = 120
-
-local function clip(line)
-    if #line > CLIP then
-        return string.sub(line, 1, CLIP) .. "..."
-    end
-    return line
-end
-
-local LEFT = { Version = "UI_Prepackaged_ServerLeftVersion", Group = "UI_Prepackaged_ServerLeftGroup" }
+local LEFT = { Version = "UI_Prepackaged_ServerLeftVersion", Group = "UI_Prepackaged_ServerLeftGroup", Value = "UI_Prepackaged_ServerLeftValue" }
 
 -- info: pack, text (the lines as copied), path, typed and untyped counts, invalid and left (Sandbox.lua) entries,
 -- hostMissing, reload and memory.

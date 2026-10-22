@@ -98,25 +98,47 @@ local function field(name)
     return "." .. name
 end
 
--- Lines appended after the game's own SandboxVars = { ... }. Each group is made first when the file has none, and a
--- line the file couldn't hold without an error is left out: a group named VERSION, which the file holds as a number,
--- and a plain name that the pack also uses as a group. entries: { name, text, type }.
-function Sandbox.lua(entries)
-    local groups = {}
-    for _, e in ipairs(entries) do
-        local dot = string.find(e.name, ".", 1, true)
-        if dot ~= nil then
-            groups[string.sub(e.name, 1, dot - 1)] = true
+local function groupOf(name)
+    local dot = string.find(name, ".", 1, true)
+    return dot and string.sub(name, 1, dot - 1), dot
+end
+
+-- Appended after the game's SandboxVars = { ... }: in a file the server never wrote the first line fails, so the server
+-- stops instead of upgrading the values as version 0. The server rewrites the file, so a line that would replace one of
+-- its groups, or fail and drop the lines after it, is left out. names: the game's options loaded here.
+function Sandbox.lua(entries, names)
+    local plain, groups = {}, {}
+    for _, name in ipairs(names or {}) do
+        local group = groupOf(name)
+        if group ~= nil then
+            groups[group] = true
+        else
+            plain[name] = true
         end
     end
-    local lines, made, left = { "SandboxVars = SandboxVars or {}" }, {}, {}
-    for _, e in ipairs(entries) do
-        local dot = string.find(e.name, ".", 1, true)
-        local group = dot and string.sub(e.name, 1, dot - 1)
+    local function clash(name)
+        local group = groupOf(name)
         if group == "VERSION" then
-            left[#left + 1] = { entry = e, reason = "Version" }
-        elseif group == nil and groups[e.name] then
-            left[#left + 1] = { entry = e, reason = "Group" }
+            return "Version"
+        elseif group ~= nil and plain[group] then
+            return "Value"
+        elseif group == nil and groups[name] then
+            return "Group"
+        end
+    end
+    local packGroups = {}
+    for _, e in ipairs(entries) do
+        local group = groupOf(e.name)
+        if group ~= nil and clash(e.name) == nil then
+            packGroups[group] = true
+        end
+    end
+    local lines, made, left = {}, {}, {}
+    for _, e in ipairs(entries) do
+        local group, dot = groupOf(e.name)
+        local reason = clash(e.name) or (group == nil and packGroups[e.name] and "Group") or nil
+        if reason ~= nil then
+            left[#left + 1] = { entry = e, reason = reason }
         else
             local target = "SandboxVars" .. field(e.name)
             if group ~= nil then

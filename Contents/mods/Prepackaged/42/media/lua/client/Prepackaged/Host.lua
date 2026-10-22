@@ -1,7 +1,8 @@
 -- A server preset in Zomboid/Server for Host, set up from a pack or put back from a backup, and the lines a dedicated
--- server needs. A mod's sandbox options exist only while the mod is loaded, so when the pack's mods aren't, the game
--- loads them first, as its own server settings screen does (ServerSettingsScreen.lua:3087-3098), and the player's own
--- list again after. The job is kept in a file across both reloads.
+-- server needs. A mod's sandbox options exist only while the mod is loaded, and the game saves a preset with only the
+-- options it has, so the pack's mods and the preset's own are loaded first, as its own server settings screen does
+-- (ServerSettingsScreen.lua:3087-3098), and the player's own list again after. The job is kept in a file across both
+-- reloads.
 local Backup = require "Prepackaged/Backup"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
@@ -46,7 +47,8 @@ local function failed(key, ...)
     return { error = key, args = { ... } }
 end
 
--- The name as the game saves it (ServerSettings sanitizes it), the files of it already there, or why it can't be used.
+-- The name as the game saves it (ServerSettings sanitizes it), the files of it already there and its Mods line, or why
+-- it can't be used.
 function Host.check(text)
     if Text.trim(text) == "" then
         return { problem = getText("UI_Prepackaged_HostNoName") }
@@ -67,6 +69,10 @@ function Host.check(text)
         check.exists[suffix] = serverFileExists(name .. suffix)
         check.existing = check.existing or check.exists[suffix]
     end
+    if check.existing then
+        settings:loadFiles()
+        check.mods = settings:getServerOptions():getOptionByName("Mods"):getValue()
+    end
     return check
 end
 
@@ -83,6 +89,31 @@ function Host.prepare(text)
     return check.problem == nil and check or nil, check.problem
 end
 
+-- A Mods line's ids, with \ removed as the server does (GameServer.java:641-649).
+local function modIds(value, into, seen)
+    for _, id in ipairs(Text.split((string.gsub(value, "\\", "")), ";")) do
+        id = Text.trim(id)
+        if id ~= "" and not seen[id] then
+            seen[id] = true
+            into[#into + 1] = id
+        end
+    end
+end
+
+-- The mods to load for a job: these, then the existing preset's own.
+local function toLoad(mods, check)
+    local list, seen = {}, {}
+    modIds(table.concat(mods, ";"), list, seen)
+    modIds(check.mods or "", list, seen)
+    return list
+end
+
+local function checked(fields, check)
+    fields.name, fields.existing, fields.reload = check.name, check.existing, not Enable.loaded(fields.mods)
+    fields.unusable = Enable.unusable(fields.mods)
+    return fields
+end
+
 -- The pack's own Mods and WorkshopItems: optional mods a player ticked aren't in the pack's WorkshopItems.
 function Host.packJob(entry, check)
     local pack = entry.result.pack
@@ -90,11 +121,10 @@ function Host.packJob(entry, check)
     for i, e in ipairs(pack.sandbox) do
         sandbox[i] = Sandbox.line(e)
     end
-    return {
-        name = check.name, title = Rows.name(pack), existing = check.existing, reload = not Enable.loaded(pack.mods),
-        before = { kind = "pack", id = pack.id, version = pack.version }, memory = Server.memory(pack.hostmemory),
-        mods = Text.copy(pack.mods), ini = Sandbox.ini(pack), sandbox = sandbox,
-    }
+    return checked({
+        title = Rows.name(pack), before = { kind = "pack", id = pack.id, version = pack.version }, memory = Server.memory(pack.hostmemory),
+        mods = toLoad(pack.mods, check), ini = Sandbox.ini(pack), sandbox = sandbox,
+    }, check)
 end
 
 -- Every value of the backup again, with the mods of its Mods line loaded, and Prepackaged to finish the job.
@@ -102,18 +132,13 @@ function Host.restoreJob(backup, check)
     local mods = { Parse.MOD_ID }
     for _, e in ipairs(Sandbox.entries(backup.ini)) do
         if e.name == "Mods" then
-            for _, id in ipairs(Text.split((string.gsub(e.value, "\\", "")), ";")) do
-                id = Text.trim(id)
-                if id ~= "" and id ~= Parse.MOD_ID then
-                    mods[#mods + 1] = id
-                end
-            end
+            mods[#mods + 1] = e.value
         end
     end
-    return {
-        name = backup.name, title = backup.name, existing = check.existing, reload = not Enable.loaded(mods),
-        before = { kind = "restore", n = backup.n }, mods = mods, ini = Text.copy(backup.ini), sandbox = Text.copy(backup.sandbox),
-    }
+    return checked({
+        title = backup.name, before = { kind = "restore", n = backup.n }, mods = toLoad(mods, check), ini = Text.copy(backup.ini),
+        sandbox = Text.copy(backup.sandbox),
+    }, check)
 end
 
 local function optionLines(options)
@@ -202,8 +227,24 @@ local function apply(job)
     job.lost = lines(lost)
 end
 
+-- Nil, or the file the backup couldn't be saved in.
+local function keep(job)
+    local ok, backup, path = pcall(backUp, job)
+    if not ok or backup == nil then
+        return ok and path or Backup.SERVERS
+    end
+    job.backup = backup.n
+end
+
 local function run(job)
-    local ok, problem = pcall(apply, job)
+    local ok, problem = pcall(function()
+        local path = job.existing and job.backup == nil and keep(job)
+        if path then
+            job.error, job.detail = "UI_Prepackaged_HostNoBackup", path
+        else
+            apply(job)
+        end
+    end)
     if not ok then
         job.error, job.detail = "UI_Prepackaged_HostFailed", tostring(problem)
     end
@@ -211,19 +252,18 @@ local function run(job)
     return job
 end
 
--- An existing preset is backed up first, and nothing is touched unless the backup reads back.
+-- An existing preset is backed up first, with its mods loaded, and nothing is written to it unless the backup reads back.
 function Host.start(job, state)
     if state.newer then
         return failed("UI_Prepackaged_FailNewer", State.FILE)
     elseif job.reload and getCore().DelayResetLua == nil then
         return failed("UI_Prepackaged_HostFeature", "Core.DelayResetLua")
     end
-    if job.existing then
-        local ok, backup, path = pcall(backUp, job)
-        if not ok or backup == nil then
-            return failed("UI_Prepackaged_FailServerBackup", ok and path or Backup.SERVERS)
+    if job.existing and not job.reload then
+        local path = keep(job)
+        if path ~= nil then
+            return failed("UI_Prepackaged_FailServerBackup", path)
         end
-        job.backup = backup.n
     end
     if not job.reload then
         return { job = run(job) }
@@ -282,14 +322,17 @@ function Host.show(job)
     screen:setVisible(true)
 end
 
-local LEFT = { Version = "UI_Prepackaged_LinesLeftVersion", Group = "UI_Prepackaged_LinesLeftGroup" }
+local LEFT = { Version = "UI_Prepackaged_LinesLeftVersion", Group = "UI_Prepackaged_LinesLeftGroup", Value = "UI_Prepackaged_LinesLeftValue" }
 
 -- The server .ini lines and the SandboxVars block, typed by each option where the game has it loaded. Text for the
 -- clipboard and the file, and what the window says of it.
 function Host.serverLines(entry)
     local pack = entry.result.pack
     local options = SandboxOptions ~= nil and SandboxOptions.new ~= nil and SandboxOptions.new() or nil
-    local entries, invalid = {}, {}
+    local entries, invalid, names = {}, {}, {}
+    for i = 1, options and options:getNumOptions() or 0 do
+        names[i] = options:getOptionByIndex(i - 1):getName()
+    end
     for _, e in ipairs(pack.sandbox) do
         local option = options and options:getOptionByName(e.name)
         if option == nil then
@@ -301,7 +344,7 @@ function Host.serverLines(entry)
             entries[#entries + 1] = { name = e.name, value = e.value, line = e.line, text = option:getValueAsString(), type = option:getType() }
         end
     end
-    local code, left = Sandbox.lua(entries)
+    local code, left = Sandbox.lua(entries, names)
     local dropped = {}
     for _, l in ipairs(left) do
         dropped[l.entry] = true
