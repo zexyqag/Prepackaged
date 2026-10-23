@@ -26,7 +26,9 @@ A pack's sandbox settings belong to a world or a server, so using a pack changes
 
 **Server** in the Prepackaged window, for the selected pack: **Copy server lines** puts the `WorkshopItems`, `Mods` and `Map` lines for a dedicated server's `.ini`, and the lines to add to the end of its `_SandboxVars.lua`, on the clipboard and in `Zomboid/Lua/Prepackaged/server/<id>.txt`. A new server writes both files when it first starts, so start it once before adding them. **Set up a server** makes or changes a server preset in `Zomboid/Server` for Host and opens the Host screen with it, after listing every file it changes. A preset it changes is backed up first, and Restore puts it back. A mod's sandbox settings exist only while the mod is loaded, so when the pack's mods, or the mods of the preset it changes, aren't all loaded, the game reloads its mods with them, then with your own list again.
 
-## Pack file format
+## For mod authors
+
+### Pack file format
 
 A pack mod is a normal Build 42 mod (`42/mod.info` and `common/`) with a `prepackaged.txt`. The game reads it from the mod's version folder (the highest one not newer than the game, such as `42` or `42.20`) when it is there, else from `common/`. The file is plain text, read line by line and never run as code.
 
@@ -68,23 +70,4 @@ ExampleMap = Map: Example Town
 
 `@locks` is read and checked already; using it comes in a later version.
 
-## Publishing
-
-Run the **Publish** workflow (Actions, Publish, Run workflow), optionally with notes for the top of the change log. It starts from the latest version: the highest `vX.Y.Z` release, or while there is none, the highest `vX.Y.Z` tag. Then:
-
-- **A release** when a commit since then is releasable (below) and something under `Contents/` changed. It is tagged `vX.Y.Z`, its notes are the change log (your notes, then the breaking changes, features and fixes from the commit messages), and `Contents/` and `preview.png` are uploaded to the Workshop item in `workshop.txt`'s `id=`, with the change log as the Steam change note.
-- **Only the Workshop page** is updated when the title, description or visibility in `workshop.txt`, or `preview.png`, changed.
-- **Nothing** otherwise.
-
-| Commit message | From 0.3.0 | From 1.4.2 |
-|---|---|---|
-| `fix: ...` | 0.3.1 | 1.4.3 |
-| `feat: ...` | 0.4.0 | 1.5.0 |
-| `feat!: ...` (any type with `!`), or a `BREAKING CHANGE:` footer | 0.4.0 | 2.0.0 |
-| any other type (`docs:`, `chore:`, ...) or message | no release | no release |
-
-A scope is fine (`fix(ui): ...`), and the highest of the commits counts. While MAJOR is 0, a breaking change raises MINOR, as a feature does. A `Release-As: X.Y.Z` footer sets the version instead; it must be higher than the latest. That is how 1.0.0 is made.
-
-The version is set by Publish: `mod.info` has no `modversion=` line in the repository, and Publish writes it into the uploaded copy. When the upload fails, the release stays a pre-release, and the next run uploads it again before it publishes anything newer.
-
-Setup: the `steam` environment holds the secrets `STEAM_USERNAME` and `STEAM_CONFIG_VDF` (steamcmd's `config/config.vdf` after a login with Steam Guard). Upload the item once from the game, which creates it and writes its `id=` into `workshop.txt`, commit that, and tag the commit you uploaded with its version (`git tag v0.1.0 <commit>`, then push the tag).
+To work on Prepackaged itself, see [CONTRIBUTING.md](CONTRIBUTING.md).
