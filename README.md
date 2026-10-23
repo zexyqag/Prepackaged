@@ -70,4 +70,4 @@ ExampleMap = Map: Example Town
 
 `@locks` is read and checked already; using it comes in a later version.
 
-To work on Prepackaged itself, see [CONTRIBUTING.md](CONTRIBUTING.md).
+To contribute to Prepackaged, see [CONTRIBUTING.md](CONTRIBUTING.md).
