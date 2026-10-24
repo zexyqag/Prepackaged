@@ -126,8 +126,10 @@ function packOwners() {
 function packNotes(c) {
   const notes = [];
   for (const o of pack.overlaps) {
-    if (o.loser === c) notes.push(el('span', { className: 'warn-text', textContent: `Loses ${o.cells} cells to ${modName(o.winner)}.` }));
-    if (o.winner === c) notes.push(el('span', { textContent: `Wins ${o.cells} cells over ${modName(o.loser)}.` }));
+    if (o.loser === c && o.patch) notes.push(el('span', { textContent: `Patched by ${modName(o.winner)} on ${counted(o.cells, 'cell')}.` }));
+    else if (o.loser === c) notes.push(el('span', { className: 'warn-text', textContent: `Loses ${o.cells} cells to ${modName(o.winner)}.` }));
+    if (o.winner === c && o.patch) notes.push(el('span', { textContent: `Patches ${modName(o.loser)} on ${counted(o.cells, 'cell')}.` }));
+    else if (o.winner === c) notes.push(el('span', { textContent: `Wins ${o.cells} cells over ${modName(o.loser)}.` }));
   }
   for (const k of pack.clashes) {
     if (!k.mods.some(m => m.key === c.key)) continue;
@@ -145,7 +147,8 @@ function renderPack() {
     ? `${counted(ordered.length, 'map mod')} from ${counted(pack.items.length, 'Workshop item')}, on ${counted(pack.cells, 'cell')}, ${count(pack.newCells)} of them beyond the vanilla map${pack.bytes ? `, about ${download(pack.bytes)} to download` : ''}.`
     : 'The pack is empty: add maps from the list below, or let Suggest fill it.';
   const warnings = [];
-  if (pack.overlaps.length) warnings.push(`Maps overlap in ${pack.overlaps.length} places: on those cells only the map higher in the list is there, so roads and buildings may end at its edge.`);
+  const overlaps = pack.overlaps.filter(o => !o.patch);
+  if (overlaps.length) warnings.push(`Maps overlap in ${overlaps.length} places: on those cells only the map higher in the list is there, so roads and buildings may end at its edge.`);
   if (pack.clashes.length) warnings.push(`${pack.clashes.length} pairs of mods can't go together: the game loads only one mod of each ID and refuses incompatible ones.`);
   if (pack.missing.length) warnings.push(`${names(pack.missing)} need mods no item in the index has: add their Workshop items to the pack yourself.`);
   $('warnings').replaceChildren(...warnings.map(text => el('li', { className: 'warn', textContent: text })));
@@ -172,7 +175,11 @@ function browseNotes(c, owners) {
   const notes = [];
   const shared = new Map();
   for (const map of c.maps) for (const cell of map.cellSet) if (owners.has(cell)) shared.set(owners.get(cell), (shared.get(owners.get(cell)) ?? 0) + 1);
-  for (const [other, cells] of shared) notes.push(el('span', { className: 'warn-text', textContent: `Overlaps ${modName(other)} by ${cells} cells.` }));
+  for (const [other, cells] of shared) {
+    notes.push(c.buildsOn.has(other.key)
+      ? el('span', { textContent: `Patches ${modName(other)} on ${counted(cells, 'cell')}.` })
+      : el('span', { className: 'warn-text', textContent: `Overlaps ${modName(other)} by ${cells} cells.` }));
+  }
   const inPack = pack.mods;
   for (const m of c.order) {
     if (inPack.includes(m)) continue;
@@ -210,7 +217,7 @@ function renderBrowse() {
   const shown = read.candidates.filter(c => {
     if (search && !`${modName(c)} ${c.item.title}`.toLowerCase().includes(search)) return false;
     if (hideMissing && c.missing.length) return false;
-    if (hideOverlapping && !inPack.has(c) && c.maps.some(map => [...map.cellSet].some(cell => owners.has(cell)))) return false;
+    if (hideOverlapping && !inPack.has(c) && c.maps.some(map => [...map.cellSet].some(cell => owners.has(cell) && !c.buildsOn.has(owners.get(cell).key)))) return false;
     return true;
   });
   shown.sort((a, b) => (key ? key(b) - key(a) : 0) || modName(a).localeCompare(modName(b)));

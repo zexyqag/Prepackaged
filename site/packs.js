@@ -62,7 +62,8 @@ function runCells(runs) {
 
 // Every mod of the build by "<item>/<folder>", with its item and maps, and the map mods: those that load and have
 // cells, each with what it needs (the mods it requires, through the items that provide each mod ID: its own item
-// first, then the lowest Workshop ID), the mod IDs no item provides, and what keeps it out of suggestions.
+// first, then the lowest Workshop ID; and the map mod of each item its item requires on the Workshop, when that item
+// has one), the map mods it builds on among them, the mod IDs no item provides, and what keeps it out of suggestions.
 export function readBuild(build) {
   const vanillaRuns = build.vanilla.find(m => m.name === VANILLA_MAP)?.cells ?? [];
   const vanilla = runCells(vanillaRuns);
@@ -83,12 +84,13 @@ export function readBuild(build) {
     }
     return null;
   };
-  const candidates = [];
+  const isMap = m => m.loads && m.maps.some(map => map.cells.length);
+  const mapsOf = new Map();
+  for (const m of mods.values()) if (isMap(m)) mapsOf.set(m.item.id, [...(mapsOf.get(m.item.id) ?? []), m]);
+  // The mods each map mod needs, in load order (what each requires first), itself last.
+  const needs = new Map();
   for (const mod of mods.values()) {
-    // Its own cells: those of the mods it needs count for them.
-    const own = new Set(mod.maps.flatMap(m => [...m.cellSet]));
-    if (!mod.loads || own.size === 0) continue;
-    // The mods it needs, in load order (what each requires first), itself last.
+    if (!isMap(mod)) continue;
     const order = [];
     const missing = [];
     const seen = new Set();
@@ -100,15 +102,18 @@ export function readBuild(build) {
         if (found) visit(found);
         else if (!missing.includes(id)) missing.push(id);
       }
+      for (const id of m.item.workshop?.requires ?? []) if (id !== m.item.id && mapsOf.get(id)?.length === 1) visit(mapsOf.get(id)[0]);
       order.push(m);
     };
     visit(mod);
-    const together = empty();
-    const fits = order.every(m => {
-      const ok = clash([m], together) === null;
-      add([m], together);
-      return ok;
-    });
+    needs.set(mod, { order, missing });
+    mod.buildsOn = new Set(order.filter(m => m !== mod && isMap(m)).map(m => m.key));
+  }
+  const candidates = [];
+  for (const [mod, { order, missing }] of needs) {
+    // Its own cells: those of the mods it needs count for them.
+    const own = new Set(mod.maps.flatMap(m => [...m.cellSet]));
+    const fits = clash(order, empty()) === null;
     const tilePacks = [...new Set(order.filter(m => m.item !== mod.item && !m.item.mods.some(o => o.loads && o.maps.length > 0)).map(m => m.item))];
     let problem = null;
     if (missing.length) problem = `needs ${missing.join(', ')}, which no item in the index has`;
@@ -125,19 +130,34 @@ export function readBuild(build) {
   return { gameVersion: build.gameVersion, vanilla, vanillaRuns, mods, candidates, byKey: new Map(candidates.map(c => [c.key, c])) };
 }
 
-// Why a mod can't go with the mods already chosen: a map of a different mod on one of its cells, a mod of the same
-// ID, or one it or they say they are incompatible with. Null when it can.
+// Whether mods may share a cell: when one of them, a patch, builds on all the others.
+const share = mods => mods.length < 2 || mods.some(top => mods.every(m => m === top || top.buildsOn?.has(m.key)));
+
+// Why mods (with each other) can't go with the mods already chosen: a mod of the same ID, one it or they say they are
+// incompatible with, or maps of mods that share a cell, unless one builds on the others. Null when they can.
 function clash(order, chosen) {
-  for (const m of order) {
-    if (chosen.mods.has(m.key)) continue;
-    const same = chosen.ids.get(m.id);
+  const fresh = order.filter(m => !chosen.mods.has(m.key));
+  const ids = new Map();
+  const cells = new Map();
+  for (const m of fresh) {
+    const same = chosen.ids.get(m.id) ?? ids.get(m.id);
     if (same) return { kind: 'id', with: same };
-    for (const id of m.incompatible) if (chosen.ids.has(id)) return { kind: 'incompatible', with: chosen.ids.get(id) };
+    ids.set(m.id, m);
+    for (const map of m.maps) for (const cell of map.cellSet) if (!cells.get(cell)?.includes(m)) cells.set(cell, [...(cells.get(cell) ?? []), m]);
+  }
+  for (const m of fresh) {
+    for (const id of m.incompatible) if (chosen.ids.has(id) || ids.has(id)) return { kind: 'incompatible', with: chosen.ids.get(id) ?? ids.get(id) };
     const against = chosen.incompatible.get(m.id);
     if (against?.length) return { kind: 'incompatible', with: against[0] };
-    for (const map of m.maps) for (const cell of map.cellSet) if (chosen.cells.has(cell)) return { kind: 'cells', with: chosen.cells.get(cell) };
   }
-  return null;
+  let found = null;
+  for (const [cell, mods] of cells) {
+    const here = [...(chosen.cells.get(cell) ?? []), ...mods];
+    if (share(here)) continue;
+    found ??= { kind: 'cells', with: here.find(m => !mods.includes(m)) ?? here[0], at: [] };
+    found.at.push(cell);
+  }
+  return found;
 }
 
 // Adds the mods not chosen yet, and returns them.
@@ -149,7 +169,7 @@ function add(order, chosen) {
     if (!chosen.items.has(m.item)) chosen.bytes += bytes(m.item);
     chosen.items.set(m.item, (chosen.items.get(m.item) ?? 0) + 1);
     for (const id of m.incompatible) chosen.incompatible.set(id, [...(chosen.incompatible.get(id) ?? []), m]);
-    for (const map of m.maps) for (const cell of map.cellSet) if (!chosen.cells.has(cell)) chosen.cells.set(cell, m);
+    for (const map of m.maps) for (const cell of map.cellSet) if (!chosen.cells.get(cell)?.includes(m)) chosen.cells.set(cell, [...(chosen.cells.get(cell) ?? []), m]);
   }
   return added;
 }
@@ -165,7 +185,13 @@ function remove(added, chosen) {
       chosen.bytes -= bytes(m.item);
     }
     for (const id of m.incompatible) chosen.incompatible.set(id, chosen.incompatible.get(id).filter(o => o !== m));
-    for (const map of m.maps) for (const cell of map.cellSet) if (chosen.cells.get(cell) === m) chosen.cells.delete(cell);
+    for (const map of m.maps) {
+      for (const cell of map.cellSet) {
+        const left = chosen.cells.get(cell)?.filter(o => o !== m) ?? [];
+        if (left.length) chosen.cells.set(cell, left);
+        else chosen.cells.delete(cell);
+      }
+    }
   }
 }
 
@@ -228,17 +254,17 @@ export function suggest(read, { priorities, weights, limits = {}, pinned = [], l
   const own = usable.map(modValue);
   // What adding a map mod with what it needs could bring at most: its own value and the gains of its items.
   const hope = usable.map((c, i) => [...new Set(c.order.map(m => m.item))].reduce((sum, item) => plus(sum, itemValue(item).map(v => Math.max(0, v))), own[i]));
-  // Two map mods conflict when one, with what it needs, clashes with the other and what it needs. Only map mods that
-  // need mods touching each other (on a cell, by ID or incompatible) are checked. Map mods go in one part when they
-  // conflict, when one needs another or when they share an item, and with an item or download limit all go in one, so
-  // the parts can be solved one by one.
-  const conflicts = conflictsOf(usable);
+  // Two map mods meet when one, with what it needs, clashes with the other and what it needs, and conflict when no
+  // patch could make them go together. Only map mods that need mods touching each other (on a cell, by ID or
+  // incompatible) are checked. Map mods go in one part when they meet, when one needs another or when they share an
+  // item, and with an item or download limit all go in one, so the parts can be solved one by one.
+  const { meets, hard: conflicts } = conflictsOf(usable);
   const part = usable.map((_, i) => i);
   const root = i => (part[i] === i ? i : (part[i] = root(part[i])));
   const join = (i, j) => { part[root(i)] = root(j); };
   const byItem = new Map();
   usable.forEach((c, i) => {
-    for (const j of conflicts[i]) join(i, j);
+    for (const j of meets[i]) join(i, j);
     if (limits.maxItems || limits.maxBytes) join(i, 0);
     for (const m of c.order) {
       if (at.has(m.key)) join(i, at.get(m.key));
@@ -272,7 +298,8 @@ export function suggest(read, { priorities, weights, limits = {}, pinned = [], l
   return { keys: [...pinned, ...added], reasons, complete: steps.complete };
 }
 
-// Per map mod of candidates, the indices of those it conflicts with.
+// Per map mod of candidates, the indices of those it clashes with (meets), and of those it can never go with (hard):
+// all but those that only share cells a patch, a map mod that builds on others, could cover.
 function conflictsOf(candidates) {
   const alone = candidates.map(c => {
     const chosen = empty();
@@ -315,11 +342,20 @@ function conflictsOf(candidates) {
       }
     }
   }
-  return candidates.map((c, i) => {
+  const patchable = new Set(candidates.filter(c => c.buildsOn.size).flatMap(c => c.maps.flatMap(map => [...map.cellSet])));
+  const meets = candidates.map(() => new Set());
+  const hard = candidates.map(() => new Set());
+  candidates.forEach((c, i) => {
     const near = new Set();
     for (const m of c.order) for (const o of touches.get(m)) for (const j of users.get(o)) if (j !== i) near.add(j);
-    return new Set([...near].filter(j => clash(c.order, alone[j]) !== null || clash(candidates[j].order, alone[i]) !== null));
+    for (const j of near) {
+      const found = [clash(c.order, alone[j]), clash(candidates[j].order, alone[i])].filter(Boolean);
+      if (!found.length) continue;
+      meets[i].add(j);
+      if (found.some(f => f.kind !== 'cells' || f.at.some(cell => !patchable.has(cell)))) hard[i].add(j);
+    }
   });
+  return { meets, hard };
 }
 
 // The best set of the map mods members (indices into usable) to add to chosen, by value vectors: a map mod brings
@@ -328,9 +364,10 @@ function conflictsOf(candidates) {
 // the best set found. Under an item or download limit the new items bound it too, each worth at most its own value and
 // that of the map mods in it, besides the map mods in items already in: under an item limit no more of them than are
 // left, under a download limit per value the most of each that fits in what is left, a part of the last one included;
-// the lowest bound counts. A map mod left out stays out, also of what later ones bring, so the bounds hold. The search
-// starts from the set that taking each map mod in order when it gains makes (under a limit, or in order of value per
-// new item or byte when that does better), and stops when the budget runs out.
+// the lowest bound counts. Whether a map mod can go in is checked against the set as it is, as a patch can make map
+// mods that share cells go together. A map mod left out stays out, also of what later ones bring, so the bounds hold.
+// The search starts from the set that taking each map mod in order when it gains makes (under a limit, or in order of
+// value per new item or byte when that does better), and stops when the budget runs out.
 function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, limits, size }) {
   const { maxItems, maxBytes } = limits;
   const order = [...members].sort((a, b) => compare(hope[b], hope[a]) || Number(usable[a].item.id) - Number(usable[b].item.id));
@@ -430,7 +467,7 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
     const brought = usable[i].order.filter(m => !chosen.mods.has(m.key));
     const map = brought.filter(m => at.has(m.key)).map(m => at.get(m.key));
     const newItems = [...new Set(brought.map(m => m.item))].filter(item => !chosen.items.has(item));
-    const can = map.every(j => state.get(j) !== 'out' && fits(j)) && !(maxItems && chosen.items.size + newItems.length > maxItems)
+    const can = map.every(j => state.get(j) !== 'out') && clash(usable[i].order, chosen) === null && !(maxItems && chosen.items.size + newItems.length > maxItems)
       && !(maxBytes && chosen.bytes + newItems.reduce((sum, item) => sum + bytes(item), 0) > maxBytes);
     const gain = newItems.reduce((sum, item) => plus(sum, itemValue(item)), map.reduce((sum, j) => plus(sum, own[j]), zero(size)));
     return { map, newItems, can, gain };
@@ -500,15 +537,27 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
   return best.set;
 }
 
-// A pack of map mods in Map= order, each after the map mods it needs: its mods in load order (each after what it
-// needs), its items, its map folders, its cells, where its maps overlap (the earlier one wins), and its problems: mod
-// IDs no item in the index has, and mods that clash by ID or say they are incompatible.
+// A pack of map mods in Map= order, each before the map mods it builds on, so that a patch's map wins its cells: its
+// mods in load order (each after what it needs), its items, its map folders, its cells, where its maps overlap (the
+// earlier one wins, a patch on purpose), and its problems: mod IDs no item in the index has, and mods that clash by ID
+// or say they are incompatible.
 export function describePack(read, keys) {
   const pack = [];
   for (const key of keys) {
-    for (const m of read.byKey.get(key).order) {
+    for (const m of [...read.byKey.get(key).order].reverse()) {
       const c = read.byKey.get(m.key);
       if (c && !pack.includes(c)) pack.push(c);
+    }
+  }
+  // One after a map mod it builds on (and that doesn't build on it) moves just before it.
+  for (let moved = true; moved;) {
+    moved = false;
+    for (let i = 0; i < pack.length && !moved; i++) {
+      const at = pack.findIndex(o => pack[i].buildsOn.has(o.key) && !o.buildsOn.has(pack[i].key));
+      if (at >= 0 && at < i) {
+        pack.splice(at, 0, ...pack.splice(i, 1));
+        moved = true;
+      }
     }
   }
   const mods = [];
@@ -532,7 +581,7 @@ export function describePack(read, keys) {
         else if (!first) owner.set(cell, c);
       }
     }
-    for (const [winner, cells] of lost) overlaps.push({ winner, loser: c, cells });
+    for (const [winner, cells] of lost) overlaps.push({ winner, loser: c, cells, patch: winner.buildsOn.has(c.key) });
   }
   const clashes = [];
   const ids = new Map();
