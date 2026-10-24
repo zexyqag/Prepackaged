@@ -6,6 +6,7 @@
 !/preview.png
 !/publish.py
 !/Contents/
+!/site/
 !/.github/
 /.github/*
 !/.github/workflows/

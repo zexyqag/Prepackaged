@@ -26,6 +26,10 @@ A pack's sandbox settings belong to a world or a server, so using a pack changes
 
 **Server** in the Prepackaged window, for the selected pack: **Copy server lines** puts the `WorkshopItems`, `Mods` and `Map` lines for a dedicated server's `.ini`, and the lines to add to the end of its `_SandboxVars.lua`, on the clipboard and in `Zomboid/Lua/Prepackaged/server/<id>.txt`. A new server writes both files when it first starts, so start it once before adding them. **Set up a server** makes or changes a server preset in `Zomboid/Server` for Host and opens the Host screen with it, after listing every file it changes. A preset it changes is backed up first, and Restore puts it back. A mod's sandbox settings exist only while the mod is loaded, so when the pack's mods, or the mods of the preset it changes, aren't all loaded, the game reloads its mods with them, then with your own list again.
 
+## Map packs
+
+The [map pack page](https://zexyqag.github.io/prepackaged/) puts together a pack of Build 42 map mods from the [Zomboid Map Index](https://github.com/zexyqag/Zomboid-Map-Index), with no two maps on one cell: the most maps, the most maps without tile packs, or the most cells with the fewest maps. It shows them on a grid with the maps it left out and why, and gives the pack file to use with **Paste a pack**. Maps that need a mod the index doesn't have, such as a tile pack it hasn't read yet, are left out.
+
 ## For mod authors
 
 ### Pack file format

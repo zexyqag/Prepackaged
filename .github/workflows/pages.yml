@@ -1,0 +1,55 @@
+name: Pages
+
+# Publishes site/, the map pack page, with the Zomboid Map Index's grid script at GRID_COMMIT and the address of its
+# site, where the page reads the build file.
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      INDEX_REPO: ${{ vars.INDEX_REPO || format('{0}/Zomboid-Map-Index', github.repository_owner) }}
+      INDEX_URL: ${{ vars.INDEX_URL || format('https://{0}.github.io/Zomboid-Map-Index/', github.repository_owner) }}
+      GRID_COMMIT: a4aa811005e6203fc2785bd75100c1f519dbfe82
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Build the site
+        run: |
+          cp -r site _site
+          curl -fsS --retry 3 "https://raw.githubusercontent.com/${INDEX_REPO}/${GRID_COMMIT}/site/grid.js" -o _site/grid.js
+          sed -i "s|data-index=\"\"|data-index=\"${INDEX_URL}\"|" _site/index.html
+          grep -qF "data-index=\"${INDEX_URL}\"" _site/index.html
+
+      # A re-run keeps the artifacts of earlier attempts, and deploy-pages refuses two with one name.
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+          name: github-pages-${{ github.run_attempt }}
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}

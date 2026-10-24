@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en" data-index="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; connect-src https:; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="color-scheme" content="light dark">
+<title>Prepackaged map packs</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --fg: #1c2230;
+    --muted: #586071;
+    --border: #d3d8e0;
+    --field: #ffffff;
+    --accent: #3f43a8;
+    --accent-fg: #ffffff;
+    --error: #a8231b;
+    --error-bg: #fdebea;
+    --focus: #1a5fd0;
+    color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #111318;
+        --card: #1a1d24;
+        --fg: #e5e7ec;
+        --muted: #a4abb8;
+        --border: #363c49;
+        --field: #12151b;
+        --accent: #a7abff;
+        --accent-fg: #14152e;
+        --error: #ff9b93;
+        --error-bg: #3b1c1a;
+        --focus: #8ab4ff;
+        color-scheme: dark;
+    }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+    overflow-wrap: anywhere;
+}
+.wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 48px; }
+header { padding: 20px 0 8px; }
+h1 { font-size: 1.5rem; margin: 0 0 4px; }
+h2 { font-size: 1.2rem; margin: 0 0 8px; }
+p { margin: 6px 0; }
+.muted, .help { color: var(--muted); }
+.help { font-size: 0.9rem; margin: 2px 0 0; }
+a { color: var(--accent); }
+textarea, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.9rem; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin: 0 0 16px; }
+.error { background: var(--error-bg); color: var(--error); border-radius: 6px; padding: 8px 12px; }
+fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 12px 0 0; padding: 8px 12px 12px; min-width: 0; }
+legend { font-weight: 700; padding: 0 4px; }
+.choice { display: block; margin: 4px 0; }
+label.field { display: block; font-weight: 600; font-size: 0.95rem; margin: 10px 0 2px; }
+input[type="text"], textarea {
+    font: inherit; color: var(--fg); background: var(--field);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; max-width: 100%;
+}
+textarea { width: 100%; min-height: 12em; resize: vertical; line-height: 1.35; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.9rem; }
+button {
+    font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer;
+}
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); padding: 6px 12px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+#grid-scroll { overflow: auto; max-height: 70vh; margin: 8px 0; }
+#grid { display: block; cursor: crosshair; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.9rem; margin: 4px 0; padding: 0; list-style: none; }
+.swatch { display: inline-block; width: 0.9em; height: 0.9em; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+.swatch.other { background: none; border: 2px solid var(--cell-other); }
+table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+th, td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font-weight: 600; }
+td.num, th.num { text-align: right; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Prepackaged map packs</h1>
+  <p class="muted">Puts together a pack of Build 42 map mods from the Zomboid Map Index, with no two maps on one cell, for a goal you pick. Prepackaged sets it up in the game.</p>
+</header>
+
+<p id="status" role="status">Reading the Zomboid Map Index...</p>
+
+<main id="main" hidden>
+  <section class="card">
+    <h2>Goal</h2>
+    <fieldset>
+      <legend>The pack has</legend>
+      <div id="goals"></div>
+    </fieldset>
+    <label class="choice"><input type="checkbox" id="no-zone-stops"> Leave out maps whose zones stop loading part way</label>
+    <p class="help">The index has <span id="counts"></span> for Build <span id="version"></span>. Maps whose cells another map has too can't go together, so of those the pack takes the ones that do best at the goal.</p>
+  </section>
+
+  <section class="card">
+    <h2>The pack's maps</h2>
+    <p id="summary"></p>
+    <label class="choice"><input type="checkbox" id="show-others" checked> Show the maps left out, outlined</label>
+    <ul class="legend" id="legend"></ul>
+    <div id="grid-scroll"><canvas id="grid"></canvas></div>
+    <p id="cell" class="help">Click a cell to see what is on it.</p>
+    <table>
+      <thead><tr><th>Map mod</th><th>Workshop item</th><th class="num">Cells</th><th class="num">Beyond the vanilla map</th><th></th></tr></thead>
+      <tbody id="chosen"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Left out</h2>
+    <table>
+      <thead><tr><th>Map mod</th><th>Workshop item</th><th>Why</th><th></th></tr></thead>
+      <tbody id="left-out"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Pack file</h2>
+    <label class="field" for="pack-id">Pack ID</label>
+    <input type="text" id="pack-id" value="MapPack" maxlength="48" spellcheck="false">
+    <p class="help" id="pack-id-help">Letters, digits, _ and -, up to 48.</p>
+    <label class="field" for="pack-name">Name</label>
+    <input type="text" id="pack-name" value="Map Pack">
+    <textarea id="pack" readonly aria-label="Pack file"></textarea>
+    <div class="buttons">
+      <button type="button" class="primary" id="copy">Copy</button>
+      <button type="button" id="download">Download</button>
+    </div>
+    <p class="help">In the game, subscribe to the pack's Workshop items, press <b>Prepackaged</b> in the main menu and <b>Paste a pack</b>, or put the downloaded file in <span class="mono">Zomboid/Lua/Prepackaged/packs</span>. For a dedicated server, the pack's <b>Server</b> button in Prepackaged gives the server's lines.</p>
+  </section>
+</main>
+</div>
+<script type="module" src="page.js"></script>
+</body>
+</html>

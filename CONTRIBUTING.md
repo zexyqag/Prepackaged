@@ -8,6 +8,7 @@ Bug reports and ideas are welcome as GitHub issues. Using a pack and the pack fi
 - `workshop.txt`: the Workshop page: the item's `id=`, title, description, tags and visibility.
 - `preview.png`: the Workshop preview image.
 - `publish.py` and `.github/workflows/publish.yml`: the release workflow.
+- `site/`: the map pack page (`index.html`, `page.js`, and `packs.js` with its rules), which `.github/workflows/pages.yml` publishes on GitHub Pages with the grid script of the Zomboid Map Index. It isn't part of the mod.
 - `.gitignore`: a whitelist. A new top-level file or folder is ignored until it has its own `!/path` rule.
 
 ## Commit messages
