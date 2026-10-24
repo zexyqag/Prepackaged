@@ -160,6 +160,15 @@ function clash(order, chosen) {
   return found;
 }
 
+// Whether a clash is only on cells where a patch could go: per cell, a map mod of patches (by cell) that builds on
+// all the mods there, those chosen and those of order.
+function curable(found, order, chosen, patches) {
+  return found.kind === 'cells' && found.at.every(cell => {
+    const here = [...(chosen.cells.get(cell) ?? []), ...order.filter(m => !chosen.mods.has(m.key) && m.maps.some(map => map.cellSet.has(cell)))];
+    return (patches.get(cell) ?? []).some(p => here.every(m => m.key === p.key || p.buildsOn.has(m.key)));
+  });
+}
+
 // Adds the mods not chosen yet, and returns them.
 function add(order, chosen) {
   const added = order.filter(m => !chosen.mods.has(m.key));
@@ -221,6 +230,9 @@ export function suggest(read, { priorities, weights, limits = {}, pinned = [], l
   const itemValue = item => criteria.map(c => (c.item ? c.item(item) : 0));
   const base = empty();
   for (const key of pinned) add(read.byKey.get(key).order, base);
+  // Per cell, the map mods on it that build on others.
+  const patches = new Map();
+  for (const c of read.candidates) if (c.buildsOn.size) for (const map of c.maps) for (const cell of map.cellSet) patches.set(cell, [...(patches.get(cell) ?? []), c]);
   const reasons = new Map();
   for (const c of read.candidates) {
     if (base.mods.has(c.key)) continue;
@@ -233,7 +245,7 @@ export function suggest(read, { priorities, weights, limits = {}, pinned = [], l
     else if (limits.minRating && !(rating(c.item) * 100 >= limits.minRating)) why = { kind: 'rating' };
     else {
       const against = clash(c.order, base);
-      if (against) why = { ...against, pinned: true };
+      if (against && !curable(against, c.order, base, patches)) why = { ...against, pinned: true };
     }
     if (why) reasons.set(c.key, why);
   }
@@ -241,7 +253,7 @@ export function suggest(read, { priorities, weights, limits = {}, pinned = [], l
   for (let more = true; more;) {
     more = false;
     for (const c of read.candidates) {
-      const out = !reasons.has(c.key) && !base.mods.has(c.key) && c.order.find(m => m !== c && reasons.has(m.key));
+      const out = !reasons.has(c.key) && !base.mods.has(c.key) && c.order.find(m => reasons.has(m.key));
       if (out) {
         reasons.set(c.key, { kind: 'needs', with: out });
         more = true;
@@ -258,7 +270,7 @@ export function suggest(read, { priorities, weights, limits = {}, pinned = [], l
   // patch could make them go together. Only map mods that need mods touching each other (on a cell, by ID or
   // incompatible) are checked. Map mods go in one part when they meet, when one needs another or when they share an
   // item, and with an item or download limit all go in one, so the parts can be solved one by one.
-  const { meets, hard: conflicts } = conflictsOf(usable);
+  const { meets, hard: conflicts } = conflictsOf(usable, patches);
   const part = usable.map((_, i) => i);
   const root = i => (part[i] === i ? i : (part[i] = root(part[i])));
   const join = (i, j) => { part[root(i)] = root(j); };
@@ -279,7 +291,7 @@ export function suggest(read, { priorities, weights, limits = {}, pinned = [], l
   const steps = { left: budget, complete: true };
   const blocked = new Array(n).fill(0);
   for (const members of parts.values()) {
-    const best = bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, limits, size: criteria.length });
+    const best = bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, patches, steps, limits, size: criteria.length });
     for (const i of best) add(usable[i].order, chosen);
     picked.push(...best);
   }
@@ -299,8 +311,8 @@ export function suggest(read, { priorities, weights, limits = {}, pinned = [], l
 }
 
 // Per map mod of candidates, the indices of those it clashes with (meets), and of those it can never go with (hard):
-// all but those that only share cells a patch, a map mod that builds on others, could cover.
-function conflictsOf(candidates) {
+// all but those that only share cells where a patch could go (see curable).
+function conflictsOf(candidates, patches) {
   const alone = candidates.map(c => {
     const chosen = empty();
     add(c.order, chosen);
@@ -342,17 +354,17 @@ function conflictsOf(candidates) {
       }
     }
   }
-  const patchable = new Set(candidates.filter(c => c.buildsOn.size).flatMap(c => c.maps.flatMap(map => [...map.cellSet])));
   const meets = candidates.map(() => new Set());
   const hard = candidates.map(() => new Set());
   candidates.forEach((c, i) => {
     const near = new Set();
     for (const m of c.order) for (const o of touches.get(m)) for (const j of users.get(o)) if (j !== i) near.add(j);
     for (const j of near) {
-      const found = [clash(c.order, alone[j]), clash(candidates[j].order, alone[i])].filter(Boolean);
-      if (!found.length) continue;
+      const one = clash(c.order, alone[j]);
+      const other = clash(candidates[j].order, alone[i]);
+      if (!one && !other) continue;
       meets[i].add(j);
-      if (found.some(f => f.kind !== 'cells' || f.at.some(cell => !patchable.has(cell)))) hard[i].add(j);
+      if ((one && !curable(one, c.order, alone[j], patches)) || (other && !curable(other, candidates[j].order, alone[i], patches))) hard[i].add(j);
     }
   });
   return { meets, hard };
@@ -368,7 +380,7 @@ function conflictsOf(candidates) {
 // mods that share cells go together. A map mod left out stays out, also of what later ones bring, so the bounds hold.
 // The search starts from the set that taking each map mod in order when it gains makes (under a limit, or in order of
 // value per new item or byte when that does better), and stops when the budget runs out.
-function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, limits, size }) {
+function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, patches, steps, limits, size }) {
   const { maxItems, maxBytes } = limits;
   const order = [...members].sort((a, b) => compare(hope[b], hope[a]) || Number(usable[a].item.id) - Number(usable[b].item.id));
   const cliques = [];
@@ -461,24 +473,27 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
     }
     return false;
   };
-  // What adding map mod i brings: the map mods it needs that aren't in yet, its new items, whether it can go in, and
-  // the gain.
+  // What adding map mod i brings: the map mods it needs that aren't in yet, its new items, whether it can go in, the
+  // clash it has (it can go in with one a patch could cure, which a patch must cure before the set is done), and the
+  // gain.
   const adding = i => {
     const brought = usable[i].order.filter(m => !chosen.mods.has(m.key));
     const map = brought.filter(m => at.has(m.key)).map(m => at.get(m.key));
     const newItems = [...new Set(brought.map(m => m.item))].filter(item => !chosen.items.has(item));
-    const can = map.every(j => state.get(j) !== 'out') && clash(usable[i].order, chosen) === null && !(maxItems && chosen.items.size + newItems.length > maxItems)
+    const open = map.every(j => state.get(j) !== 'out') && !(maxItems && chosen.items.size + newItems.length > maxItems)
       && !(maxBytes && chosen.bytes + newItems.reduce((sum, item) => sum + bytes(item), 0) > maxBytes);
+    const found = open ? clash(usable[i].order, chosen) : null;
+    const can = open && (!found || curable(found, usable[i].order, chosen, patches));
     const gain = newItems.reduce((sum, item) => plus(sum, itemValue(item)), map.reduce((sum, j) => plus(sum, own[j]), zero(size)));
-    return { map, newItems, can, gain };
+    return { map, newItems, can, found, gain };
   };
   const greedy = sequence => {
     const added = [];
     let value = zero(size);
     for (const i of sequence) {
       if (state.has(i)) continue;
-      const { map, can, gain } = adding(i);
-      if (!can || compare(gain, zero(size)) <= 0) continue;
+      const { map, can, found, gain } = adding(i);
+      if (!can || found || compare(gain, zero(size)) <= 0) continue;
       added.push(add(usable[i].order, chosen));
       for (const j of map) enter(j);
       value = plus(value, gain);
@@ -496,6 +511,8 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
     const thrifty = greedy([...order].sort((a, b) => compare(scale(hope[b], cost.get(a)), scale(hope[a], cost.get(b)))));
     if (compare(thrifty.value, best.value) > 0) best = thrifty;
   }
+  // The cells that went in shared without a patch yet.
+  const owed = [];
   const step = (k, value) => {
     if (steps.left <= 0) {
       steps.complete = false;
@@ -504,16 +521,19 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
     steps.left -= 1 + order.length - k;
     if (beaten(k, value)) return;
     if (k === order.length) {
-      best = { value, set: [...inSet] };
+      if (owed.every(cell => share(chosen.cells.get(cell)))) best = { value, set: [...inSet] };
       return;
     }
     const i = order[k];
     if (state.get(i) === 'in') return step(k + 1, value);
-    const { map, newItems, can, gain } = adding(i);
+    const { map, newItems, can, found, gain } = adding(i);
     const take = () => {
       const added = add(usable[i].order, chosen);
       for (const j of map) enter(j);
+      const cells = found?.at ?? [];
+      owed.push(...cells);
       step(k + 1, plus(value, gain));
+      owed.length -= cells.length;
       for (const j of map) leave(j);
       remove(added, chosen);
     };
