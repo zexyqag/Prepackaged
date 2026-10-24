@@ -102,13 +102,18 @@ th, td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(
 th { font-weight: 600; white-space: nowrap; }
 td.num, th.num { text-align: right; white-space: nowrap; }
 td.actions { white-space: nowrap; text-align: right; }
-td.notes { font-size: 0.9rem; color: var(--muted); min-width: 12em; }
+td.notes { font-size: 0.9rem; color: var(--muted); }
+#browse td.notes { min-width: 12em; }
 td.notes .bad { color: var(--error); }
 td.notes .warn-text { color: var(--warn); }
+#browse-table:not(.scored) .score { display: none; }
 img.thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 8px; float: left; }
 ol#priorities { padding-left: 1.5em; margin: 4px 0; }
 ol#priorities li { margin: 2px 0; }
 ol#priorities li.off { color: var(--muted); }
+ol#priorities.weights { list-style: none; padding-left: 0; }
+ol#priorities.weights li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(6em, 10em) 2em; gap: 8px; align-items: center; }
+ol#priorities.weights li span { text-align: right; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -147,18 +152,23 @@ ol#priorities li.off { color: var(--muted); }
   <div>
   <section class="card">
     <h2>Suggest</h2>
-    <p class="help">Fills the pack with the maps that do best by your priorities, without two of them on one cell. Each priority settles what the ones above it leave even.</p>
+    <p class="help">Fills the pack with the maps that do best by your priorities, without two of them on one cell.</p>
     <div class="buttons" id="presets"></div>
     <fieldset>
       <legend>Priorities</legend>
+      <label class="choice"><input type="radio" name="mode" id="mode-order"> In order: each one settles what the ones above it leave even</label>
+      <label class="choice"><input type="radio" name="mode" id="mode-score"> By score: each one weighs as much as you set</label>
       <ol id="priorities"></ol>
+      <p class="help" id="weights-help" hidden>Each counts as its share of the most any map in the index has, for or against, times its weight: at 10 for more cells, the biggest map scores 10.</p>
     </fieldset>
     <fieldset>
       <legend>Limits</legend>
       <label class="choice"><input type="checkbox" id="no-tile-packs"> No tile packs or other items without maps</label>
       <label class="choice"><input type="checkbox" id="no-zone-stops"> No maps whose zones stop loading part way</label>
       <label class="choice"><input type="checkbox" id="with-spawns"> Only maps with spawn points</label>
+      <label class="choice">Rated at least <input type="number" id="min-rating" min="1" max="100" step="1" placeholder="any">% on the Workshop</label>
       <label class="choice">At most <input type="number" id="max-items" min="1" step="1" placeholder="any"> Workshop items</label>
+      <label class="choice">At most <input type="number" id="max-download" min="1" step="1" placeholder="any"> MB to download</label>
     </fieldset>
     <div class="buttons">
       <button type="button" class="primary" id="fill">Fill my pack</button>
@@ -178,13 +188,13 @@ ol#priorities li.off { color: var(--muted); }
     <label class="choice"><input type="checkbox" id="hide-missing"> Hide maps that need mods the index doesn't have</label>
     <p class="help" id="count"></p>
     <div class="table-scroll">
-      <table>
-        <thead><tr><th>Map mod</th><th>Workshop item</th><th class="num">Cells</th><th class="num">Subscribers</th><th class="num">Kept</th><th class="num">Rating</th><th>Notes</th><th></th></tr></thead>
+      <table id="browse-table">
+        <thead><tr><th>Map mod</th><th>Workshop item</th><th class="num">Cells</th><th class="num">Subscribers</th><th class="num">Kept</th><th class="num">Rating</th><th class="num score">Score</th><th>Notes</th><th></th></tr></thead>
         <tbody id="browse"></tbody>
       </table>
     </div>
     <div class="buttons" id="pager"></div>
-    <p class="help">Kept: the subscribers it has of all it ever had. Rating: the share of up votes on the Workshop.</p>
+    <p class="help">Kept: the subscribers it has of all it ever had. Rating: Steam's score from the up and down votes, which trusts more votes more. Score: what the map and what it needs bring to a pack by your weights.</p>
   </section>
 
   <section class="card">

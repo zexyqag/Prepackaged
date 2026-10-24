@@ -4,8 +4,17 @@
 export const VANILLA_MAP = 'Muldraugh, KY';
 export const workshopUrl = id => `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
 
-// What a suggestion can aim at, in the order picked, each one breaking the ties of those before it: per map mod in the
-// pack (mod) or per Workshop item in it (item), tile packs included.
+// Steam's score of a Workshop item from its up and down votes, which trusts more votes more, or null without votes.
+export function rating(item) {
+  const w = item.workshop;
+  return w && w.votesUp + w.votesDown > 0 ? w.score : null;
+}
+
+const bytes = item => item.workshop?.fileSize ?? 0;
+const hasMaps = item => item.mods.some(m => m.loads && m.maps.length > 0);
+
+// What a suggestion can aim at: in order, each one breaking the ties of those before it, or weighed into one score.
+// Each counts per map mod in the pack (mod) or per Workshop item in it (item), tile packs included.
 export const CRITERIA = {
   maps: { label: 'More maps', mod: () => 1 },
   fewerMaps: { label: 'Fewer maps', mod: () => -1 },
@@ -14,10 +23,29 @@ export const CRITERIA = {
   spawns: { label: 'More spawn points', mod: m => m.spawnPoints },
   subscribers: { label: 'More subscribers', item: i => i.workshop?.subscribers ?? 0 },
   // Above Steam's middle score counts for, below it against.
-  rating: { label: 'Better rated on the Workshop', item: i => (i.workshop?.score ?? 0.5) - 0.5 },
+  rating: { label: 'Better rated on the Workshop', item: i => (rating(i) ?? 0.5) - 0.5 },
   items: { label: 'Fewer Workshop items', item: () => -1 },
-  size: { label: 'Smaller download', item: i => -(i.workshop?.fileSize ?? 0) },
+  tilePacks: { label: 'Fewer tile packs', item: i => (hasMaps(i) ? 0 : -1) },
+  size: { label: 'Smaller download', item: i => -bytes(i) },
 };
+
+// One criterion for weights (keys of CRITERIA, any number): each criterion counts as its share of the largest value,
+// for or against, that it has in the index, times its weight; in millionths, so that sums are exact.
+export function scoring(read, weights) {
+  const used = Object.entries(weights).filter(([, w]) => w > 0).map(([name, w]) => [CRITERIA[name], w]);
+  const items = [...new Set(read.candidates.flatMap(c => c.order.map(m => m.item)))];
+  const largest = used.map(([c]) => Math.max(0, ...(c.mod ? read.candidates.map(c.mod) : items.map(c.item)).map(Math.abs)));
+  const score = (kind, x) => Math.round(1e6 * used.reduce((sum, [c, w], k) => (c[kind] && largest[k] ? sum + (w * c[kind](x)) / largest[k] : sum), 0));
+  return { mod: m => score('mod', m), item: i => score('item', i) };
+}
+
+// Per map mod, the score of a pack of it and what it needs, for weights.
+export function scores(read, weights) {
+  const { mod, item } = scoring(read, weights);
+  return new Map(read.candidates.map(c => [c.key,
+    (c.order.filter(m => read.byKey.has(m.key)).reduce((sum, m) => sum + mod(read.byKey.get(m.key)), 0)
+      + [...new Set(c.order.map(m => m.item))].reduce((sum, i) => sum + item(i), 0)) / 1e6]));
+}
 
 export const PRESETS = {
   maps: { label: 'Most maps', priorities: ['maps', 'cells'], limits: {} },
@@ -118,6 +146,7 @@ function add(order, chosen) {
   for (const m of added) {
     chosen.mods.set(m.key, m);
     chosen.ids.set(m.id, m);
+    if (!chosen.items.has(m.item)) chosen.bytes += bytes(m.item);
     chosen.items.set(m.item, (chosen.items.get(m.item) ?? 0) + 1);
     for (const id of m.incompatible) chosen.incompatible.set(id, [...(chosen.incompatible.get(id) ?? []), m]);
     for (const map of m.maps) for (const cell of map.cellSet) if (!chosen.cells.has(cell)) chosen.cells.set(cell, m);
@@ -131,13 +160,16 @@ function remove(added, chosen) {
     chosen.ids.delete(m.id);
     const left = chosen.items.get(m.item) - 1;
     if (left) chosen.items.set(m.item, left);
-    else chosen.items.delete(m.item);
+    else {
+      chosen.items.delete(m.item);
+      chosen.bytes -= bytes(m.item);
+    }
     for (const id of m.incompatible) chosen.incompatible.set(id, chosen.incompatible.get(id).filter(o => o !== m));
     for (const map of m.maps) for (const cell of map.cellSet) if (chosen.cells.get(cell) === m) chosen.cells.delete(cell);
   }
 }
 
-const empty = () => ({ mods: new Map(), ids: new Map(), items: new Map(), incompatible: new Map(), cells: new Map() });
+const empty = () => ({ mods: new Map(), ids: new Map(), items: new Map(), bytes: 0, incompatible: new Map(), cells: new Map() });
 
 // Values are vectors, one number per priority, compared in order.
 const zero = n => new Array(n).fill(0);
@@ -151,13 +183,14 @@ function compare(a, b) {
 // Under a second of search in a browser.
 const BUDGET = 1000000;
 
-// The best map mods to add to a pack for priorities (keys of CRITERIA) within limits (noTilePacks, noZoneStops,
-// withSpawns, maxItems): the map mods of pinned (keys) stay, with what they need, whether or not they overlap, and
-// those of leftOut never come in. Returns the pack's map mods, pinned first, per map mod left out why, and whether the
-// search checked every set it had to within its budget, of map mods its steps look at (else the pack is the best it
-// found).
-export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = new Set(), budget = BUDGET }) {
-  const criteria = priorities.map(name => CRITERIA[name]);
+// The best map mods to add to a pack for priorities (keys of CRITERIA, in order) or else weights (see scoring) within
+// limits (noTilePacks, noZoneStops, withSpawns, minRating: the percent of Steam's score a map mod's own item has at
+// least, maxItems, maxBytes: the most the pack's items download): the map mods of pinned (keys) stay, with what they
+// need, whether or not they overlap, and those of leftOut never come in. Returns the pack's map mods, pinned first,
+// per map mod left out why, and whether the search checked every set it had to within its budget, of map mods its
+// steps look at (else the pack is the best it found).
+export function suggest(read, { priorities, weights, limits = {}, pinned = [], leftOut = new Set(), budget = BUDGET }) {
+  const criteria = weights ? [scoring(read, weights)] : priorities.map(name => CRITERIA[name]);
   const modValue = m => criteria.map(c => (c.mod ? c.mod(m) : 0));
   const itemValue = item => criteria.map(c => (c.item ? c.item(item) : 0));
   const base = empty();
@@ -171,6 +204,7 @@ export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = 
     else if (limits.noTilePacks && c.tilePacks.length) why = { kind: 'tilePacks', items: c.tilePacks };
     else if (limits.noZoneStops && c.zoneStops.length) why = { kind: 'zones', stops: c.zoneStops };
     else if (limits.withSpawns && c.spawnPoints === 0) why = { kind: 'noSpawns' };
+    else if (limits.minRating && !(rating(c.item) * 100 >= limits.minRating)) why = { kind: 'rating' };
     else {
       const against = clash(c.order, base);
       if (against) why = { ...against, pinned: true };
@@ -196,8 +230,8 @@ export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = 
   const hope = usable.map((c, i) => [...new Set(c.order.map(m => m.item))].reduce((sum, item) => plus(sum, itemValue(item).map(v => Math.max(0, v))), own[i]));
   // Two map mods conflict when one, with what it needs, clashes with the other and what it needs. Only map mods that
   // need mods touching each other (on a cell, by ID or incompatible) are checked. Map mods go in one part when they
-  // conflict, when one needs another or when they share an item, and with an item limit all go in one, so the parts
-  // can be solved one by one.
+  // conflict, when one needs another or when they share an item, and with an item or download limit all go in one, so
+  // the parts can be solved one by one.
   const conflicts = conflictsOf(usable);
   const part = usable.map((_, i) => i);
   const root = i => (part[i] === i ? i : (part[i] = root(part[i])));
@@ -205,7 +239,7 @@ export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = 
   const byItem = new Map();
   usable.forEach((c, i) => {
     for (const j of conflicts[i]) join(i, j);
-    if (limits.maxItems) join(i, 0);
+    if (limits.maxItems || limits.maxBytes) join(i, 0);
     for (const m of c.order) {
       if (at.has(m.key)) join(i, at.get(m.key));
       if (byItem.has(m.item)) join(i, byItem.get(m.item));
@@ -219,7 +253,7 @@ export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = 
   const steps = { left: budget, complete: true };
   const blocked = new Array(n).fill(0);
   for (const members of parts.values()) {
-    const best = bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, maxItems: limits.maxItems, size: criteria.length });
+    const best = bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, limits, size: criteria.length });
     for (const i of best) add(usable[i].order, chosen);
     picked.push(...best);
   }
@@ -227,8 +261,12 @@ export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = 
     if (chosen.mods.has(c.key)) continue;
     const why = clash(c.order, chosen);
     if (why) reasons.set(c.key, why);
-    else if (limits.maxItems && chosen.items.size + c.order.filter(m => !chosen.items.has(m.item)).length > limits.maxItems) reasons.set(c.key, { kind: 'maxItems' });
-    else reasons.set(c.key, { kind: 'noGain' });
+    else {
+      const newItems = [...new Set(c.order.map(m => m.item))].filter(item => !chosen.items.has(item));
+      if (limits.maxItems && chosen.items.size + newItems.length > limits.maxItems) reasons.set(c.key, { kind: 'maxItems' });
+      else if (limits.maxBytes && chosen.bytes + newItems.reduce((sum, item) => sum + bytes(item), 0) > limits.maxBytes) reasons.set(c.key, { kind: 'maxBytes' });
+      else reasons.set(c.key, { kind: 'noGain' });
+    }
   }
   const added = read.candidates.filter(c => chosen.mods.has(c.key) && !pinned.includes(c.key)).map(c => c.key);
   return { keys: [...pinned, ...added], reasons, complete: steps.complete };
@@ -287,12 +325,14 @@ function conflictsOf(candidates) {
 // The best set of the map mods members (indices into usable) to add to chosen, by value vectors: a map mod brings
 // the map mods it needs and its items. Branch and bound in order of value, each map mod in or out: a branch ends where
 // even the most hopeful map mod of each group that all conflict with each other (cliques, made greedily) couldn't beat
-// the best set found. Under an item limit the new items bound it too: no more of them than are left, each worth at
-// most its own value and that of the map mods in it, besides the map mods in items already in; the lower bound counts.
-// A map mod left out stays out, also of what later ones bring, so the bounds hold. The search starts from the set that
-// taking each map mod in order when it gains makes (under an item limit, or in order of value per new item when that
-// does better), and stops when the budget runs out.
-function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, maxItems, size }) {
+// the best set found. Under an item or download limit the new items bound it too, each worth at most its own value and
+// that of the map mods in it, besides the map mods in items already in: under an item limit no more of them than are
+// left, under a download limit per value the most of each that fits in what is left, a part of the last one included;
+// the lowest bound counts. A map mod left out stays out, also of what later ones bring, so the bounds hold. The search
+// starts from the set that taking each map mod in order when it gains makes (under a limit, or in order of value per
+// new item or byte when that does better), and stops when the budget runs out.
+function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, limits, size }) {
+  const { maxItems, maxBytes } = limits;
   const order = [...members].sort((a, b) => compare(hope[b], hope[a]) || Number(usable[a].item.id) - Number(usable[b].item.id));
   const cliques = [];
   const cliqueOf = new Map();
@@ -354,7 +394,7 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
       if (compare(hope[i], zero(size)) > 0) sum = plus(sum, hope[i]);
     }
     if (compare(sum, best.value) <= 0) return true;
-    if (!maxItems) return false;
+    if (!maxItems && !maxBytes) return false;
     let old = value;
     const worth = new Map();
     for (const i of left) {
@@ -363,8 +403,26 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
       else worth.set(item, plus(worth.get(item) ?? itemGain.get(item), ownGain.get(i)));
       for (const m of usable[i].order) if (!chosen.items.has(m.item) && !worth.has(m.item)) worth.set(m.item, itemGain.get(m.item));
     }
-    for (const v of [...worth.values()].sort((a, b) => compare(b, a)).slice(0, Math.max(0, maxItems - chosen.items.size))) old = plus(old, v);
-    return compare(old, best.value) <= 0;
+    if (maxItems) {
+      let most = old;
+      for (const v of [...worth.values()].sort((a, b) => compare(b, a)).slice(0, Math.max(0, maxItems - chosen.items.size))) most = plus(most, v);
+      if (compare(most, best.value) <= 0) return true;
+    }
+    if (maxBytes) {
+      const most = [...old];
+      for (let k = 0; k < size; k++) {
+        const per = item => (bytes(item) ? worth.get(item)[k] / bytes(item) : Infinity);
+        let room = maxBytes - chosen.bytes;
+        for (const item of [...worth.keys()].filter(item => worth.get(item)[k] > 0).sort((a, b) => per(b) - per(a) || 0)) {
+          const share = bytes(item) <= room ? 1 : room / bytes(item);
+          most[k] += share * worth.get(item)[k];
+          room -= share * bytes(item);
+          if (share < 1) break;
+        }
+      }
+      if (compare(most, best.value) <= 0) return true;
+    }
+    return false;
   };
   // What adding map mod i brings: the map mods it needs that aren't in yet, its new items, whether it can go in, and
   // the gain.
@@ -372,7 +430,8 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
     const brought = usable[i].order.filter(m => !chosen.mods.has(m.key));
     const map = brought.filter(m => at.has(m.key)).map(m => at.get(m.key));
     const newItems = [...new Set(brought.map(m => m.item))].filter(item => !chosen.items.has(item));
-    const can = map.every(j => state.get(j) !== 'out' && fits(j)) && !(maxItems && chosen.items.size + newItems.length > maxItems);
+    const can = map.every(j => state.get(j) !== 'out' && fits(j)) && !(maxItems && chosen.items.size + newItems.length > maxItems)
+      && !(maxBytes && chosen.bytes + newItems.reduce((sum, item) => sum + bytes(item), 0) > maxBytes);
     const gain = newItems.reduce((sum, item) => plus(sum, itemValue(item)), map.reduce((sum, j) => plus(sum, own[j]), zero(size)));
     return { map, newItems, can, gain };
   };
@@ -393,9 +452,10 @@ function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue,
     return found;
   };
   best = greedy(order);
-  if (maxItems) {
-    const cost = new Map(order.map(i => [i, new Set(usable[i].order.map(m => m.item).filter(item => !chosen.items.has(item))).size]));
-    const scale = (v, by) => v.map(x => x * by);
+  const scale = (v, by) => v.map(x => x * by);
+  for (const [limit, price] of [[maxItems, () => 1], [maxBytes, bytes]]) {
+    if (!limit) continue;
+    const cost = new Map(order.map(i => [i, [...new Set(usable[i].order.map(m => m.item))].filter(item => !chosen.items.has(item)).reduce((sum, item) => sum + price(item), 0)]));
     const thrifty = greedy([...order].sort((a, b) => compare(scale(hope[b], cost.get(a)), scale(hope[a], cost.get(b)))));
     if (compare(thrifty.value, best.value) > 0) best = thrifty;
   }
@@ -482,9 +542,11 @@ export function describePack(read, keys) {
   }
   for (const m of mods) for (const id of m.incompatible) if (ids.has(id) && ids.get(id) !== m) clashes.push({ kind: 'incompatible', mods: [m, ids.get(id)] });
   const cells = new Set(owner.keys());
+  const items = [...new Set(mods.map(m => m.item))];
   return {
-    pack, mods, overlaps, clashes,
-    items: [...new Set(mods.map(m => m.item))],
+    pack, mods, overlaps, clashes, items,
+    // What its items download, as far as the Workshop's figures tell.
+    bytes: items.reduce((sum, item) => sum + bytes(item), 0),
     maps: [...new Set(pack.flatMap(c => c.maps.map(map => map.name)))].filter(name => name !== VANILLA_MAP),
     missing: pack.filter(c => c.missing.length),
     cells: cells.size,

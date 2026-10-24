@@ -2,7 +2,7 @@
 // pack from the maps added by hand or by Suggest, shown on the grid, as a list in Map= order and as a pack file. The
 // pack lives in the page's address, Suggest's settings in this browser.
 import * as Grid from './grid.js';
-import { CRITERIA, PRESETS, describePack, packText, readBuild, readPack, suggest, validId, workshopUrl } from './packs.js';
+import { CRITERIA, PRESETS, describePack, packText, rating, readBuild, readPack, scores, suggest, validId, workshopUrl } from './packs.js';
 
 const BUILD = 42;
 const SETTINGS = 'prepackaged-map-packs';
@@ -13,6 +13,9 @@ const state = {
   leftOut: new Set(),
   priorities: Object.keys(CRITERIA),
   on: new Set(PRESETS.maps.priorities),
+  // Suggest goes by the priorities in order, or by a score of them weighed.
+  mode: 'order',
+  weights: { cells: 10, rating: 5, size: 3, tilePacks: 2 },
   limits: {},
   showOthers: true,
   page: 0,
@@ -33,6 +36,8 @@ const itemLink = item => el('a', { href: workshopUrl(item.id), target: '_blank',
 const modName = m => m.name || m.id;
 const count = n => n.toLocaleString('en-US');
 const percent = (part, whole) => `${Math.round((100 * part) / whole)}%`;
+const MB = 1048576;
+const download = b => (b >= 1024 * MB ? `${(b / (1024 * MB)).toFixed(1)} GB` : `${Math.max(1, Math.round(b / MB))} MB`);
 const names = list => list.map(modName).join(', ');
 
 function thumb(item) {
@@ -70,6 +75,8 @@ function loadSettings() {
     const order = saved.priorities.filter(p => known.includes(p));
     state.priorities = [...order, ...known.filter(p => !order.includes(p))];
     state.on = new Set(saved.on.filter(p => known.includes(p)));
+    state.mode = saved.mode === 'score' ? 'score' : 'order';
+    for (const name of known) if (Number.isInteger(saved.weights?.[name])) state.weights[name] = Math.min(10, Math.max(0, saved.weights[name]));
     state.limits = saved.limits ?? {};
   } catch {
     // Settings that can't be read are left as they start.
@@ -77,7 +84,7 @@ function loadSettings() {
 }
 function saveSettings() {
   try {
-    localStorage.setItem(SETTINGS, JSON.stringify({ priorities: state.priorities, on: [...state.on], limits: state.limits }));
+    localStorage.setItem(SETTINGS, JSON.stringify({ priorities: state.priorities, on: [...state.on], mode: state.mode, weights: state.weights, limits: state.limits }));
   } catch {
     // Without storage the settings last as long as the page.
   }
@@ -134,7 +141,7 @@ function packNotes(c) {
 function renderPack() {
   const ordered = pack.pack;
   $('summary').textContent = ordered.length
-    ? `${ordered.length} map mods from ${pack.items.length} Workshop items, on ${count(pack.cells)} cells, ${count(pack.newCells)} of them beyond the vanilla map.`
+    ? `${ordered.length} map mods from ${pack.items.length} Workshop items, on ${count(pack.cells)} cells, ${count(pack.newCells)} of them beyond the vanilla map${pack.bytes ? `, about ${download(pack.bytes)} to download` : ''}.`
     : 'The pack is empty: add maps from the list below, or let Suggest fill it.';
   const warnings = [];
   if (pack.overlaps.length) warnings.push(`Maps overlap in ${pack.overlaps.length} places: on those cells only the map higher in the list is there, so roads and buildings may end at its edge.`);
@@ -179,8 +186,9 @@ function browseNotes(c, owners) {
 }
 
 const SORTS = {
+  score: ['Score', null],
   subscribers: ['Subscribers', c => c.item.workshop?.subscribers ?? -1],
-  rating: ['Rating', c => { const w = c.item.workshop; return w && w.votesUp + w.votesDown ? w.votesUp / (w.votesUp + w.votesDown) : -1; }],
+  rating: ['Rating', c => rating(c.item) ?? -1],
   kept: ['Kept', c => { const w = c.item.workshop; return w?.lifetimeSubscribers ? w.subscribers / w.lifetimeSubscribers : -1; }],
   cells: ['Cells', c => c.cells],
   updated: ['Last updated', c => c.item.workshop?.timeUpdated ?? c.item.timeUpdated],
@@ -194,7 +202,8 @@ function renderBrowse() {
   const search = $('search').value.trim().toLowerCase();
   const hideOverlapping = $('hide-overlapping').checked;
   const hideMissing = $('hide-missing').checked;
-  const [, key] = SORTS[$('sort').value];
+  const scored = state.mode === 'score' ? scores(read, state.weights) : null;
+  const key = $('sort').value === 'score' ? c => scored.get(c.key) : SORTS[$('sort').value][1];
   const shown = read.candidates.filter(c => {
     if (search && !`${modName(c)} ${c.item.title}`.toLowerCase().includes(search)) return false;
     if (hideMissing && c.missing.length) return false;
@@ -223,13 +232,15 @@ function renderBrowse() {
   $('browse').replaceChildren(...rows.map(c => {
     const w = c.item.workshop;
     const votes = w ? w.votesUp + w.votesDown : 0;
+    const rated = rating(c.item);
     return el('tr', {},
       el('td', {}, thumb(c.item), modName(c)),
       el('td', {}, itemLink(c.item)),
       el('td', { className: 'num', textContent: count(c.cells) }),
       el('td', { className: 'num', textContent: w?.subscribers == null ? '' : count(w.subscribers) }),
       el('td', { className: 'num', textContent: w?.lifetimeSubscribers ? percent(w.subscribers, w.lifetimeSubscribers) : '' }),
-      el('td', { className: 'num', textContent: votes ? percent(w.votesUp, votes) : '', title: votes ? `${count(w.votesUp)} up, ${count(w.votesDown)} down` : '' }),
+      el('td', { className: 'num', textContent: rated === null ? '' : percent(rated, 1), title: votes ? `${count(w.votesUp)} up, ${count(w.votesDown)} down` : '' }),
+      el('td', { className: 'num score', textContent: scored ? scored.get(c.key).toFixed(1) : '' }),
       el('td', { className: 'notes' }, ...browseNotes(c, owners)),
       el('td', { className: 'actions' }, inPack.has(c)
         ? button('Take out', () => removeMap(c.key), { ariaLabel: `Take ${modName(c)} out` })
@@ -296,21 +307,48 @@ function render() {
 }
 
 function renderSettings() {
-  $('priorities').replaceChildren(...state.priorities.map((name, i) => el('li', { className: state.on.has(name) ? '' : 'off' },
-    el('label', {}, el('input', { type: 'checkbox', checked: state.on.has(name), onchange: e => {
-      if (e.target.checked) state.on.add(name);
-      else state.on.delete(name);
-      settingsChanged();
-    } }), ` ${CRITERIA[name].label} `),
-    button('Up', () => movePriority(i, -1), { disabled: i === 0, ariaLabel: `Move ${CRITERIA[name].label} up` }), ' ',
-    button('Down', () => movePriority(i, 1), { disabled: i === state.priorities.length - 1, ariaLabel: `Move ${CRITERIA[name].label} down` }))));
+  const byScore = state.mode === 'score';
+  $('mode-order').checked = !byScore;
+  $('mode-score').checked = byScore;
+  $('weights-help').hidden = !byScore;
+  $('priorities').classList.toggle('weights', byScore);
+  $('priorities').replaceChildren(...(byScore
+    ? Object.keys(CRITERIA).map(name => {
+      const shown = el('span', { textContent: state.weights[name] ?? 0 });
+      return el('li', { className: state.weights[name] ? '' : 'off' },
+        el('label', { htmlFor: `weight-${name}`, textContent: CRITERIA[name].label }),
+        el('input', { type: 'range', id: `weight-${name}`, min: 0, max: 10, step: 1, value: state.weights[name] ?? 0,
+          oninput: e => { shown.textContent = e.target.value; },
+          onchange: e => {
+            state.weights[name] = Number(e.target.value);
+            settingsChanged();
+            renderBrowse();
+          } }),
+        shown);
+    })
+    : state.priorities.map((name, i) => el('li', { className: state.on.has(name) ? '' : 'off' },
+      el('label', {}, el('input', { type: 'checkbox', checked: state.on.has(name), onchange: e => {
+        if (e.target.checked) state.on.add(name);
+        else state.on.delete(name);
+        settingsChanged();
+      } }), ` ${CRITERIA[name].label} `),
+      button('Up', () => movePriority(i, -1), { disabled: i === 0, ariaLabel: `Move ${CRITERIA[name].label} up` }), ' ',
+      button('Down', () => movePriority(i, 1), { disabled: i === state.priorities.length - 1, ariaLabel: `Move ${CRITERIA[name].label} down` })))));
   $('no-tile-packs').checked = Boolean(state.limits.noTilePacks);
   $('no-zone-stops').checked = Boolean(state.limits.noZoneStops);
   $('with-spawns').checked = Boolean(state.limits.withSpawns);
+  $('min-rating').value = state.limits.minRating ?? '';
   $('max-items').value = state.limits.maxItems ?? '';
-  const any = state.on.size > 0;
+  $('max-download').value = state.limits.maxBytes ? state.limits.maxBytes / MB : '';
+  const any = byScore ? Object.values(state.weights).some(w => w > 0) : state.on.size > 0;
   $('fill').disabled = !any;
   $('replace').disabled = !any;
+  // The list's score goes with the mode.
+  const sort = $('sort').value;
+  const sorts = Object.entries(SORTS).filter(([value]) => byScore || value !== 'score');
+  $('sort').replaceChildren(...sorts.map(([value, [label]]) => el('option', { value, textContent: label })));
+  $('sort').value = sorts.some(([value]) => value === sort) ? sort : 'subscribers';
+  $('browse-table').classList.toggle('scored', byScore);
 }
 function settingsChanged() {
   saveSettings();
@@ -324,6 +362,7 @@ function movePriority(at, by) {
 }
 function usePreset(name) {
   const { priorities, limits } = PRESETS[name];
+  state.mode = 'order';
   state.priorities = [...priorities, ...Object.keys(CRITERIA).filter(p => !priorities.includes(p))];
   state.on = new Set(priorities);
   state.limits = { ...limits };
@@ -333,12 +372,13 @@ function usePreset(name) {
 const WHY = {
   leftOut: 'you took out', problem: "can't go in a pack", tilePacks: 'need tile packs', zones: 'have zones that stop loading',
   noSpawns: 'have no spawn points', needs: 'need a map left out', cells: 'overlap', id: 'have a mod ID already in it',
-  incompatible: 'are incompatible with it', maxItems: 'go past the item limit', noGain: 'add nothing to the priorities',
+  incompatible: 'are incompatible with it', rating: 'are rated below the least or not at all', maxItems: 'go past the item limit',
+  maxBytes: 'go past the download limit', noGain: 'add nothing to the priorities',
 };
 function runSuggest(keep) {
   const before = new Set(state.keys);
   const result = suggest(read, {
-    priorities: state.priorities.filter(p => state.on.has(p)), limits: state.limits,
+    priorities: state.priorities.filter(p => state.on.has(p)), weights: state.mode === 'score' ? state.weights : undefined, limits: state.limits,
     pinned: keep ? state.keys : [], leftOut: state.leftOut,
   });
   setKeys(result.keys);
@@ -366,13 +406,27 @@ function setUp() {
   $('legend').replaceChildren(...[['vanilla', 'The vanilla map'], ['mod', 'A map of the pack'], ['over', 'A map of the pack over the vanilla map'], ['shared', 'Maps of the pack that overlap'], ['other', 'A map not in the pack']]
     .map(([kind, text]) => el('li', {}, el('span', { className: `swatch ${kind}`, style: kind === 'other' ? '' : `background: var(--cell-${kind})` }), text)));
   $('presets').replaceChildren('Start from: ', ...Object.entries(PRESETS).flatMap(([name, p], i) => [i ? ' ' : '', button(p.label, () => usePreset(name))]));
-  $('sort').replaceChildren(...Object.entries(SORTS).map(([value, [label]]) => el('option', { value, textContent: label })));
+  for (const mode of ['order', 'score']) {
+    $(`mode-${mode}`).onchange = () => {
+      state.mode = mode;
+      settingsChanged();
+      renderBrowse();
+    };
+  }
   $('no-tile-packs').onchange = e => { state.limits.noTilePacks = e.target.checked; settingsChanged(); };
   $('no-zone-stops').onchange = e => { state.limits.noZoneStops = e.target.checked; settingsChanged(); };
   $('with-spawns').onchange = e => { state.limits.withSpawns = e.target.checked; settingsChanged(); };
+  const whole = e => Math.max(0, Number.parseInt(e.target.value, 10) || 0);
+  $('min-rating').onchange = e => {
+    state.limits.minRating = Math.min(100, whole(e)) || undefined;
+    settingsChanged();
+  };
   $('max-items').onchange = e => {
-    const n = Number.parseInt(e.target.value, 10);
-    state.limits.maxItems = n > 0 ? n : undefined;
+    state.limits.maxItems = whole(e) || undefined;
+    settingsChanged();
+  };
+  $('max-download').onchange = e => {
+    state.limits.maxBytes = whole(e) * MB || undefined;
     settingsChanged();
   };
   $('fill').onclick = () => runSuggest(true);
