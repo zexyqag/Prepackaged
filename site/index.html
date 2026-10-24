@@ -43,6 +43,7 @@
     }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
     margin: 0;
@@ -52,6 +53,12 @@ body {
     overflow-wrap: anywhere;
 }
 .wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px 48px; }
+/* Wide windows: the pack on the left stays in view, the rest scrolls on the right. */
+@media (min-width: 1300px) {
+    .wrap { max-width: none; padding: 0 24px; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 20px; align-items: start; }
+    #pack-card { position: sticky; top: 0; max-height: 100vh; overflow: auto; margin-bottom: 0; }
+}
 header { padding: 20px 0 8px; }
 h1 { font-size: 1.5rem; margin: 0 0 4px; }
 h2 { font-size: 1.2rem; margin: 0 0 8px; }
@@ -95,7 +102,7 @@ th, td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(
 th { font-weight: 600; white-space: nowrap; }
 td.num, th.num { text-align: right; white-space: nowrap; }
 td.actions { white-space: nowrap; text-align: right; }
-td.notes { font-size: 0.9rem; color: var(--muted); }
+td.notes { font-size: 0.9rem; color: var(--muted); min-width: 12em; }
 td.notes .bad { color: var(--error); }
 td.notes .warn-text { color: var(--warn); }
 img.thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 8px; float: left; }
@@ -114,7 +121,7 @@ ol#priorities li.off { color: var(--muted); }
 <p id="status" role="status">Reading the Zomboid Map Index...</p>
 
 <main id="main" hidden>
-  <section class="card">
+  <section class="card" id="pack-card">
     <h2>Your pack</h2>
     <p id="summary"></p>
     <ul class="warnings" id="warnings"></ul>
@@ -137,6 +144,7 @@ ol#priorities li.off { color: var(--muted); }
     <p id="also" class="help"></p>
   </section>
 
+  <div>
   <section class="card">
     <h2>Suggest</h2>
     <p class="help">Fills the pack with the maps that do best by your priorities, without two of them on one cell. Each priority settles what the ones above it leave even.</p>
@@ -161,7 +169,7 @@ ol#priorities li.off { color: var(--muted); }
   </section>
 
   <section class="card">
-    <h2>Maps</h2>
+    <h2 id="maps-heading">Maps</h2>
     <div class="row">
       <div><label class="field" for="search">Search</label><input type="search" id="search" placeholder="Map or Workshop item"></div>
       <div><label class="field" for="sort">Sort by</label><select id="sort"></select></div>
@@ -175,6 +183,7 @@ ol#priorities li.off { color: var(--muted); }
         <tbody id="browse"></tbody>
       </table>
     </div>
+    <div class="buttons" id="pager"></div>
     <p class="help">Kept: the subscribers it has of all it ever had. Rating: the share of up votes on the Workshop.</p>
   </section>
 
@@ -198,6 +207,7 @@ ol#priorities li.off { color: var(--muted); }
       <input type="file" id="load-file" accept=".txt,text/plain" aria-label="Load a pack file">
     </div>
   </section>
+  </div>
 </main>
 </div>
 <script type="module" src="page.js"></script>

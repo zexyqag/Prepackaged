@@ -148,11 +148,15 @@ function compare(a, b) {
   return 0;
 }
 
+// Under a second of search in a browser.
+const BUDGET = 1000000;
+
 // The best map mods to add to a pack for priorities (keys of CRITERIA) within limits (noTilePacks, noZoneStops,
 // withSpawns, maxItems): the map mods of pinned (keys) stay, with what they need, whether or not they overlap, and
 // those of leftOut never come in. Returns the pack's map mods, pinned first, per map mod left out why, and whether the
-// search checked every set it had to within budget steps (else the pack is the best it found).
-export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = new Set(), budget = 20000 }) {
+// search checked every set it had to within its budget, of map mods its steps look at (else the pack is the best it
+// found).
+export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = new Set(), budget = BUDGET }) {
   const criteria = priorities.map(name => CRITERIA[name]);
   const modValue = m => criteria.map(c => (c.mod ? c.mod(m) : 0));
   const itemValue = item => criteria.map(c => (c.item ? c.item(item) : 0));
@@ -190,21 +194,18 @@ export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = 
   const own = usable.map(modValue);
   // What adding a map mod with what it needs could bring at most: its own value and the gains of its items.
   const hope = usable.map((c, i) => [...new Set(c.order.map(m => m.item))].reduce((sum, item) => plus(sum, itemValue(item).map(v => Math.max(0, v))), own[i]));
-  // Two map mods conflict when one, with what it needs, clashes with the other and what it needs. Map mods go in one
-  // part when they conflict, when one needs another or when they share an item, and with an item limit all go in one,
-  // so the parts can be solved one by one.
-  const alone = usable.map(c => {
-    const chosen = empty();
-    add(c.order, chosen);
-    return chosen;
-  });
-  const conflict = usable.map((a, i) => usable.map((b, j) => i !== j && (clash(a.order, alone[j]) !== null || clash(b.order, alone[i]) !== null)));
+  // Two map mods conflict when one, with what it needs, clashes with the other and what it needs. Only map mods that
+  // need mods touching each other (on a cell, by ID or incompatible) are checked. Map mods go in one part when they
+  // conflict, when one needs another or when they share an item, and with an item limit all go in one, so the parts
+  // can be solved one by one.
+  const conflicts = conflictsOf(usable);
   const part = usable.map((_, i) => i);
   const root = i => (part[i] === i ? i : (part[i] = root(part[i])));
   const join = (i, j) => { part[root(i)] = root(j); };
   const byItem = new Map();
   usable.forEach((c, i) => {
-    for (let j = 0; j < n; j++) if (conflict[i][j] || limits.maxItems) join(i, j);
+    for (const j of conflicts[i]) join(i, j);
+    if (limits.maxItems) join(i, 0);
     for (const m of c.order) {
       if (at.has(m.key)) join(i, at.get(m.key));
       if (byItem.has(m.item)) join(i, byItem.get(m.item));
@@ -216,8 +217,9 @@ export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = 
   const chosen = base;
   const picked = [];
   const steps = { left: budget, complete: true };
+  const blocked = new Array(n).fill(0);
   for (const members of parts.values()) {
-    const best = bestOf(members, { usable, own, hope, conflict, at, itemValue, chosen, steps, maxItems: limits.maxItems, size: criteria.length });
+    const best = bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, maxItems: limits.maxItems, size: criteria.length });
     for (const i of best) add(usable[i].order, chosen);
     picked.push(...best);
   }
@@ -232,50 +234,137 @@ export function suggest(read, { priorities, limits = {}, pinned = [], leftOut = 
   return { keys: [...pinned, ...added], reasons, complete: steps.complete };
 }
 
+// Per map mod of candidates, the indices of those it conflicts with.
+function conflictsOf(candidates) {
+  const alone = candidates.map(c => {
+    const chosen = empty();
+    add(c.order, chosen);
+    return chosen;
+  });
+  // Per mod they need, the map mods that need it, and the mods it touches.
+  const users = new Map();
+  candidates.forEach((c, i) => {
+    for (const m of c.order) {
+      if (!users.has(m)) users.set(m, []);
+      users.get(m).push(i);
+    }
+  });
+  const touches = new Map([...users.keys()].map(m => [m, new Set()]));
+  const together = (list, m) => {
+    for (const o of list) {
+      if (o === m) continue;
+      touches.get(m).add(o);
+      touches.get(o).add(m);
+    }
+    list.push(m);
+  };
+  const onCell = new Map();
+  const withId = new Map();
+  for (const m of users.keys()) {
+    for (const cell of new Set(m.maps.flatMap(map => [...map.cellSet]))) {
+      if (!onCell.has(cell)) onCell.set(cell, []);
+      together(onCell.get(cell), m);
+    }
+    if (!withId.has(m.id)) withId.set(m.id, []);
+    together(withId.get(m.id), m);
+  }
+  for (const m of users.keys()) {
+    for (const id of m.incompatible) {
+      for (const o of withId.get(id) ?? []) {
+        if (o === m) continue;
+        touches.get(m).add(o);
+        touches.get(o).add(m);
+      }
+    }
+  }
+  return candidates.map((c, i) => {
+    const near = new Set();
+    for (const m of c.order) for (const o of touches.get(m)) for (const j of users.get(o)) if (j !== i) near.add(j);
+    return new Set([...near].filter(j => clash(c.order, alone[j]) !== null || clash(candidates[j].order, alone[i]) !== null));
+  });
+}
+
 // The best set of the map mods members (indices into usable) to add to chosen, by value vectors: a map mod brings
 // the map mods it needs and its items. Branch and bound in order of value, each map mod in or out: a branch ends where
 // even the most hopeful map mod of each group that all conflict with each other (cliques, made greedily) couldn't beat
 // the best set found. Under an item limit the new items bound it too: no more of them than are left, each worth at
 // most its own value and that of the map mods in it, besides the map mods in items already in; the lower bound counts.
 // A map mod left out stays out, also of what later ones bring, so the bounds hold. The search starts from the set that
-// taking each map mod in order when it gains makes, and stops when steps run out.
-function bestOf(members, { usable, own, hope, conflict, at, itemValue, chosen, steps, maxItems, size }) {
+// taking each map mod in order when it gains makes (under an item limit, or in order of value per new item when that
+// does better), and stops when the budget runs out.
+function bestOf(members, { usable, own, hope, conflicts, blocked, at, itemValue, chosen, steps, maxItems, size }) {
   const order = [...members].sort((a, b) => compare(hope[b], hope[a]) || Number(usable[a].item.id) - Number(usable[b].item.id));
   const cliques = [];
   const cliqueOf = new Map();
   for (const i of order) {
-    let clique = cliques.find(c => c.every(j => conflict[i][j]));
-    if (!clique) cliques.push((clique = []));
+    // The first clique whose map mods all conflict with it: one of those it conflicts with is in it.
+    let clique = null;
+    for (const j of conflicts[i]) {
+      const c = cliqueOf.get(j);
+      if (c && (!clique || c.at < clique.at) && c.every(k => conflicts[i].has(k))) clique = c;
+    }
+    if (!clique) {
+      clique = [];
+      clique.at = cliques.length;
+      cliques.push(clique);
+    }
     clique.push(i);
     cliqueOf.set(i, clique);
   }
+  const position = new Map(order.map((i, k) => [i, k]));
+  // Per item, the map mods that need it.
+  const needing = new Map();
+  for (const i of order) {
+    for (const item of new Set(usable[i].order.map(m => m.item))) {
+      if (!needing.has(item)) needing.set(item, []);
+      needing.get(item).push(i);
+    }
+  }
   const state = new Map();
+  // The map mods in, and per map mod how many of them it conflicts with.
   const inSet = [];
-  let best = { value: zero(size), set: [] };
-  const fits = i => inSet.every(j => !conflict[i][j]);
-  const bound = from => {
-    const top = new Map();
+  const enter = j => {
+    state.set(j, 'in');
+    inSet.push(j);
+    for (const k of conflicts[j]) blocked[k]++;
+  };
+  const leave = j => {
+    state.delete(j);
+    inSet.splice(inSet.lastIndexOf(j), 1);
+    for (const k of conflicts[j]) blocked[k]--;
+  };
+  let best;
+  const fits = i => blocked[i] === 0;
+  const ownGain = new Map(order.map(i => [i, positive(own[i])]));
+  const itemGain = new Map();
+  for (const i of order) for (const m of usable[i].order) if (!itemGain.has(m.item)) itemGain.set(m.item, positive(itemValue(m.item)));
+  // Whether the map mods from k on can't add more than the best set has over value: the first of each clique that can
+  // still go in is its most hopeful, and a clique can add nothing.
+  const beaten = (from, value) => {
+    const top = new Set();
     const left = [];
+    let sum = value;
     for (let k = from; k < order.length; k++) {
       const i = order[k];
       if (state.has(i) || !fits(i)) continue;
       left.push(i);
       const clique = cliqueOf.get(i);
-      if (compare(hope[i], top.get(clique) ?? zero(size)) > 0) top.set(clique, hope[i]);
+      if (top.has(clique)) continue;
+      top.add(clique);
+      if (compare(hope[i], zero(size)) > 0) sum = plus(sum, hope[i]);
     }
-    let sum = zero(size);
-    for (const v of top.values()) sum = plus(sum, v);
-    if (!maxItems) return sum;
-    let old = zero(size);
+    if (compare(sum, best.value) <= 0) return true;
+    if (!maxItems) return false;
+    let old = value;
     const worth = new Map();
     for (const i of left) {
       const item = usable[i].item;
-      if (chosen.items.has(item)) old = plus(old, positive(own[i]));
-      else worth.set(item, plus(worth.get(item) ?? positive(itemValue(item)), positive(own[i])));
-      for (const m of usable[i].order) if (!chosen.items.has(m.item) && !worth.has(m.item)) worth.set(m.item, positive(itemValue(m.item)));
+      if (chosen.items.has(item)) old = plus(old, ownGain.get(i));
+      else worth.set(item, plus(worth.get(item) ?? itemGain.get(item), ownGain.get(i)));
+      for (const m of usable[i].order) if (!chosen.items.has(m.item) && !worth.has(m.item)) worth.set(m.item, itemGain.get(m.item));
     }
     for (const v of [...worth.values()].sort((a, b) => compare(b, a)).slice(0, Math.max(0, maxItems - chosen.items.size))) old = plus(old, v);
-    return compare(old, sum) < 0 ? old : sum;
+    return compare(old, best.value) <= 0;
   };
   // What adding map mod i brings: the map mods it needs that aren't in yet, its new items, whether it can go in, and
   // the gain.
@@ -287,29 +376,36 @@ function bestOf(members, { usable, own, hope, conflict, at, itemValue, chosen, s
     const gain = newItems.reduce((sum, item) => plus(sum, itemValue(item)), map.reduce((sum, j) => plus(sum, own[j]), zero(size)));
     return { map, newItems, can, gain };
   };
-  const greedy = [];
-  let start = zero(size);
-  for (const i of order) {
-    if (state.has(i)) continue;
-    const { map, can, gain } = adding(i);
-    if (!can || compare(gain, zero(size)) <= 0) continue;
-    greedy.push(add(usable[i].order, chosen));
-    for (const j of map) {
-      state.set(j, 'in');
-      inSet.push(j);
+  const greedy = sequence => {
+    const added = [];
+    let value = zero(size);
+    for (const i of sequence) {
+      if (state.has(i)) continue;
+      const { map, can, gain } = adding(i);
+      if (!can || compare(gain, zero(size)) <= 0) continue;
+      added.push(add(usable[i].order, chosen));
+      for (const j of map) enter(j);
+      value = plus(value, gain);
     }
-    start = plus(start, gain);
+    const found = { value, set: [...inSet] };
+    for (const mods of added.reverse()) remove(mods, chosen);
+    for (const j of [...inSet]) leave(j);
+    return found;
+  };
+  best = greedy(order);
+  if (maxItems) {
+    const cost = new Map(order.map(i => [i, new Set(usable[i].order.map(m => m.item).filter(item => !chosen.items.has(item))).size]));
+    const scale = (v, by) => v.map(x => x * by);
+    const thrifty = greedy([...order].sort((a, b) => compare(scale(hope[b], cost.get(a)), scale(hope[a], cost.get(b)))));
+    if (compare(thrifty.value, best.value) > 0) best = thrifty;
   }
-  best = { value: start, set: [...inSet] };
-  for (const added of greedy.reverse()) remove(added, chosen);
-  state.clear();
-  inSet.length = 0;
   const step = (k, value) => {
-    if (steps.left-- <= 0) {
+    if (steps.left <= 0) {
       steps.complete = false;
       return;
     }
-    if (compare(plus(value, bound(k)), best.value) <= 0) return;
+    steps.left -= 1 + order.length - k;
+    if (beaten(k, value)) return;
     if (k === order.length) {
       best = { value, set: [...inSet] };
       return;
@@ -319,18 +415,12 @@ function bestOf(members, { usable, own, hope, conflict, at, itemValue, chosen, s
     const { map, newItems, can, gain } = adding(i);
     const take = () => {
       const added = add(usable[i].order, chosen);
-      for (const j of map) {
-        state.set(j, 'in');
-        inSet.push(j);
-      }
+      for (const j of map) enter(j);
       step(k + 1, plus(value, gain));
-      for (const j of map) {
-        state.delete(j);
-        inSet.pop();
-      }
+      for (const j of map) leave(j);
       remove(added, chosen);
     };
-    const leave = () => {
+    const skip = () => {
       state.set(i, 'out');
       step(k + 1, value);
       state.delete(i);
@@ -339,11 +429,11 @@ function bestOf(members, { usable, own, hope, conflict, at, itemValue, chosen, s
     // is tried after the sets without it, so that it goes in only when it does better.
     if (can && compare(gain, zero(size)) > 0) {
       take();
-      leave();
+      skip();
     } else {
-      leave();
+      skip();
       const costly = newItems.filter(item => itemValue(item).some(v => v < 0));
-      if (can && costly.length && order.slice(k + 1).some(j => !state.has(j) && usable[j].order.some(m => costly.includes(m.item)))) take();
+      if (can && costly.some(item => (needing.get(item) ?? []).some(j => position.get(j) > k && !state.has(j)))) take();
     }
   };
   step(0, zero(size));

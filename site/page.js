@@ -6,6 +6,7 @@ import { CRITERIA, PRESETS, describePack, packText, readBuild, readPack, suggest
 
 const BUILD = 42;
 const SETTINGS = 'prepackaged-map-packs';
+const PAGE = 50;
 const $ = id => document.getElementById(id);
 const state = {
   keys: [],
@@ -14,6 +15,7 @@ const state = {
   on: new Set(PRESETS.maps.priorities),
   limits: {},
   showOthers: true,
+  page: 0,
 };
 let read = null;
 let pack = null;
@@ -156,7 +158,7 @@ function renderPack() {
 }
 
 function browseNotes(c, owners) {
-  if (state.keys.includes(c.key)) return [el('span', { textContent: 'In the pack.' })];
+  if (pack.pack.includes(c)) return [el('span', { textContent: 'In the pack.' })];
   const notes = [];
   const shared = new Map();
   for (const map of c.maps) for (const cell of map.cellSet) if (owners.has(cell)) shared.set(owners.get(cell), (shared.get(owners.get(cell)) ?? 0) + 1);
@@ -185,8 +187,10 @@ const SORTS = {
   name: ['Name', null],
 };
 
+// The list a page at a time, from the first page when what it shows changes.
 function renderBrowse() {
   const owners = packOwners();
+  const inPack = new Set(pack.pack);
   const search = $('search').value.trim().toLowerCase();
   const hideOverlapping = $('hide-overlapping').checked;
   const hideMissing = $('hide-missing').checked;
@@ -194,12 +198,29 @@ function renderBrowse() {
   const shown = read.candidates.filter(c => {
     if (search && !`${modName(c)} ${c.item.title}`.toLowerCase().includes(search)) return false;
     if (hideMissing && c.missing.length) return false;
-    if (hideOverlapping && !state.keys.includes(c.key) && c.maps.some(map => [...map.cellSet].some(cell => owners.has(cell)))) return false;
+    if (hideOverlapping && !inPack.has(c) && c.maps.some(map => [...map.cellSet].some(cell => owners.has(cell)))) return false;
     return true;
   });
   shown.sort((a, b) => (key ? key(b) - key(a) : 0) || modName(a).localeCompare(modName(b)));
-  $('count').textContent = `${shown.length} of ${read.candidates.length} map mods.`;
-  $('browse').replaceChildren(...shown.map(c => {
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE));
+  state.page = Math.min(state.page, pages - 1);
+  const from = state.page * PAGE;
+  const rows = shown.slice(from, from + PAGE);
+  $('count').textContent = shown.length > rows.length
+    ? `${count(from + 1)} to ${count(from + rows.length)} of ${count(shown.length)} map mods${shown.length < read.candidates.length ? `, of ${count(read.candidates.length)}` : ''}.`
+    : `${count(shown.length)} of ${count(read.candidates.length)} map mods.`;
+  const turn = to => () => {
+    state.page = to;
+    renderBrowse();
+    $('maps-heading').scrollIntoView({ block: 'start' });
+  };
+  $('pager').hidden = pages === 1;
+  $('pager').replaceChildren(
+    button('Previous', turn(state.page - 1), { disabled: state.page === 0 }), ' ',
+    `Page ${state.page + 1} of ${pages}`, ' ',
+    button('Next', turn(state.page + 1), { disabled: state.page === pages - 1 }),
+  );
+  $('browse').replaceChildren(...rows.map(c => {
     const w = c.item.workshop;
     const votes = w ? w.votesUp + w.votesDown : 0;
     return el('tr', {},
@@ -210,7 +231,7 @@ function renderBrowse() {
       el('td', { className: 'num', textContent: w?.lifetimeSubscribers ? percent(w.subscribers, w.lifetimeSubscribers) : '' }),
       el('td', { className: 'num', textContent: votes ? percent(w.votesUp, votes) : '', title: votes ? `${count(w.votesUp)} up, ${count(w.votesDown)} down` : '' }),
       el('td', { className: 'notes' }, ...browseNotes(c, owners)),
-      el('td', { className: 'actions' }, state.keys.includes(c.key)
+      el('td', { className: 'actions' }, inPack.has(c)
         ? button('Take out', () => removeMap(c.key), { ariaLabel: `Take ${modName(c)} out` })
         : button('Add', () => addMap(c.key), { ariaLabel: `Add ${modName(c)}` })),
     );
@@ -226,9 +247,10 @@ function gridColors() {
 
 function drawGrid() {
   const canvas = $('grid');
+  const inPack = new Set(pack.pack);
   const inOrder = pack.pack.flatMap(c => c.maps.map(map => ({ keys: Grid.runKeys(map.cells), item: c.item.id, mod: c })));
   const others = state.showOthers
-    ? read.candidates.filter(c => !pack.pack.includes(c)).flatMap(c => c.maps.map(map => ({ keys: Grid.runKeys(map.cells), mod: c })))
+    ? read.candidates.filter(c => !inPack.has(c)).flatMap(c => c.maps.map(map => ({ keys: Grid.runKeys(map.cells), mod: c })))
     : [];
   view = { owners: Grid.cellMaps(inOrder), vanillaKeys: new Set(Grid.runKeys(read.vanillaRuns)), others };
   drawn = Grid.draw(canvas, { ...view, squares: 256, width: $('grid-scroll').clientWidth, dark: darkScheme.matches });
@@ -356,7 +378,12 @@ function setUp() {
   $('fill').onclick = () => runSuggest(true);
   $('replace').onclick = () => runSuggest(false);
   $('show-others').onchange = e => { state.showOthers = e.target.checked; drawGrid(); };
-  for (const id of ['search', 'sort', 'hide-overlapping', 'hide-missing']) $(id).oninput = renderBrowse;
+  for (const id of ['search', 'sort', 'hide-overlapping', 'hide-missing']) {
+    $(id).oninput = () => {
+      state.page = 0;
+      renderBrowse();
+    };
+  }
   $('pack-id').oninput = () => { renderPackFile(); writeAddress(); };
   $('pack-name').oninput = () => { renderPackFile(); writeAddress(); };
   $('grid').onclick = describeCell;
