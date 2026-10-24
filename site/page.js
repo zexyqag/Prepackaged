@@ -35,6 +35,7 @@ const button = (text, onclick, props = {}) => el('button', { type: 'button', tex
 const itemLink = item => el('a', { href: workshopUrl(item.id), target: '_blank', rel: 'noopener', textContent: item.title || item.id });
 const modName = m => m.name || m.id;
 const count = n => n.toLocaleString('en-US');
+const counted = (n, what) => `${count(n)} ${what}${n === 1 ? '' : 's'}`;
 const percent = (part, whole) => `${Math.round((100 * part) / whole)}%`;
 const MB = 1048576;
 const download = b => (b >= 1024 * MB ? `${(b / (1024 * MB)).toFixed(1)} GB` : `${Math.max(1, Math.round(b / MB))} MB`);
@@ -141,7 +142,7 @@ function packNotes(c) {
 function renderPack() {
   const ordered = pack.pack;
   $('summary').textContent = ordered.length
-    ? `${ordered.length} map mods from ${pack.items.length} Workshop items, on ${count(pack.cells)} cells, ${count(pack.newCells)} of them beyond the vanilla map${pack.bytes ? `, about ${download(pack.bytes)} to download` : ''}.`
+    ? `${counted(ordered.length, 'map mod')} from ${counted(pack.items.length, 'Workshop item')}, on ${counted(pack.cells, 'cell')}, ${count(pack.newCells)} of them beyond the vanilla map${pack.bytes ? `, about ${download(pack.bytes)} to download` : ''}.`
     : 'The pack is empty: add maps from the list below, or let Suggest fill it.';
   const warnings = [];
   if (pack.overlaps.length) warnings.push(`Maps overlap in ${pack.overlaps.length} places: on those cells only the map higher in the list is there, so roads and buildings may end at its edge.`);
@@ -162,6 +163,8 @@ function renderPack() {
   const others = pack.items.filter(item => !ordered.some(c => c.item === item));
   $('also').replaceChildren(...(others.length ? ['Also in the pack, for mods its maps need: ', ...others.flatMap((item, i) => (i ? [', ', itemLink(item)] : [itemLink(item)])), '.'] : []));
   $('clear').disabled = !ordered.length;
+  $('left-out').hidden = !state.leftOut.size;
+  $('left-out-count').textContent = `You took out ${counted(state.leftOut.size, 'map mod')}, so Suggest leaves ${state.leftOut.size === 1 ? 'it' : 'them'} out.`;
 }
 
 function browseNotes(c, owners) {
@@ -386,7 +389,8 @@ function runSuggest(keep) {
   const kinds = new Map();
   for (const why of result.reasons.values()) kinds.set(why.kind, (kinds.get(why.kind) ?? 0) + 1);
   const left = [...kinds].map(([kind, n]) => `${n} ${WHY[kind]}`).join(', ');
-  $('suggested').textContent = `${keep ? `Added ${added} map mods` : `Suggested ${state.keys.length} map mods`}.${left ? ` Not in it: ${left}.` : ''}${result.complete ? '' : ' Suggest stopped before it checked every combination, so a better pack may exist.'}`;
+  const what = keep ? (added ? `Added ${counted(added, 'map mod')}` : 'Nothing to add') : `Suggested ${counted(state.keys.length, 'map mod')}`;
+  $('suggested').textContent = `${what}.${left ? ` Not in it: ${left}.` : ''}${result.complete ? '' : ' Suggest stopped before it checked every combination, so a better pack may exist.'}`;
   message('');
 }
 
@@ -399,7 +403,7 @@ function loadPack(text) {
   if (loaded.id) $('pack-id').value = loaded.id;
   if (loaded.name) $('pack-name').value = loaded.name;
   setKeys(loaded.keys);
-  message(`Loaded ${loaded.keys.length} map mods from the pack file.${loaded.unknown.length ? ` The index doesn't have ${loaded.unknown.join(', ')}, so they are left out.` : ''}`);
+  message(`Loaded ${counted(loaded.keys.length, 'map mod')} from the pack file.${loaded.unknown.length ? ` The index doesn't have ${loaded.unknown.join(', ')}, so they are left out.` : ''}`);
 }
 
 function setUp() {
@@ -430,6 +434,12 @@ function setUp() {
     settingsChanged();
   };
   $('fill').onclick = () => runSuggest(true);
+  $('let-in').onclick = () => {
+    const n = state.leftOut.size;
+    state.leftOut.clear();
+    render();
+    $('suggested').textContent = `Suggest takes the ${counted(n, 'map mod')} you took out again.`;
+  };
   $('replace').onclick = () => runSuggest(false);
   $('show-others').onchange = e => { state.showOthers = e.target.checked; drawGrid(); };
   for (const id of ['search', 'sort', 'hide-overlapping', 'hide-missing']) {
