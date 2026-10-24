@@ -28,7 +28,7 @@ A pack's sandbox settings belong to a world or a server, so using a pack changes
 
 ## Map packs
 
-The [map pack page](https://zexyqag.github.io/prepackaged/) puts together a pack of Build 42 map mods from the [Zomboid Map Index](https://github.com/zexyqag/Zomboid-Map-Index), with no two maps on one cell: the most maps, the most maps without tile packs, or the most cells with the fewest maps. It shows them on a grid with the maps it left out and why, and gives the pack file to use with **Paste a pack**. Maps that need a mod the index doesn't have, such as a tile pack it hasn't read yet, are left out.
+The [map pack page](https://zexyqag.github.io/prepackaged/) builds a pack of Build 42 map mods from the [Zomboid Map Index](https://github.com/zexyqag/Zomboid-Map-Index). Add maps from its list, which shows each map's cells, subscribers, how many subscribers it kept and its Workshop rating, or let **Suggest** fill the pack: it adds the maps that do best by your priorities in the order you put them (more maps, more cells, more spawn points, more subscribers, better rated, fewer Workshop items, a smaller download and more), within limits such as no tile packs or at most so many items, and never puts two of its maps on one cell. Maps you add yourself may overlap: the pack's map order decides which one the game takes on those cells, and the page says where. The page shows the pack on a grid and gives the pack file to use with **Paste a pack**; its address holds the pack, so you can share it, and it can load a pack file to keep working on it. Maps that need a mod the index doesn't have are marked, and Suggest leaves them out.
 
 ## For mod authors
 
