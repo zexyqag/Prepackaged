@@ -1,10 +1,11 @@
 -- The pack's @sandbox lines: sorted by what the game makes of them, as Lua for a server's _SandboxVars.lua, the record of
 -- the preset Pack <id>, and the changes between two versions.
+local Build = require "Prepackaged/Build"
 local Text = require "Prepackaged/Text"
 
 local Sandbox = {}
 
-Sandbox.RECORDS = "Prepackaged/presets"
+Sandbox.RECORDS = Build.FOLDER .. "/presets"
 Sandbox.STATUSES = { "changed", "same", "set", "hidden", "missing", "invalid", "lost" }
 
 local KEYWORDS = {}
@@ -15,7 +16,7 @@ end
 
 -- Preset names may not hold / \ : ; " . (SandboxOptions.isValidPresetName), and a pack id never does.
 function Sandbox.presetName(pack)
-    return "Pack " .. pack.id
+    return Build.presetName(pack.id)
 end
 
 function Sandbox.recordPath(pack)

@@ -1,4 +1,5 @@
 require "ISUI/ISPanel"
+local Build = require "Prepackaged/Build"
 local Rows = require "Prepackaged/Rows"
 local Subscriptions = require "Prepackaged/Subscriptions"
 local Widgets = require "Prepackaged/UI/Widgets"
@@ -32,7 +33,7 @@ function SubscriptionsWindow:createChildren()
     self:addChild(self.list)
 
     self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_btn_back") }, self.onBack)
-    self.backButton:enableCancelColor()
+    Build.cancel(self.backButton)
     self.refreshButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Refresh") }, self.refresh)
     self.refreshButton:setX(self.width - UI_BORDER_SPACING - self.refreshButton.width)
     self:refresh()

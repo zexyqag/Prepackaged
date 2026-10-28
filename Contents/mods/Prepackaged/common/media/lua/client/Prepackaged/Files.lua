@@ -1,4 +1,5 @@
 local Backup = require "Prepackaged/Backup"
+local Build = require "Prepackaged/Build"
 local ModList = require "Prepackaged/ModList"
 local Parse = require "Prepackaged/Parse"
 local State = require "Prepackaged/State"
@@ -6,7 +7,7 @@ local Text = require "Prepackaged/Text"
 
 local Files = {}
 
-Files.PACKS = "Prepackaged/packs"
+Files.PACKS = Build.FOLDER .. "/packs"
 Files.PRESET_COPY = Backup.FOLDER .. "/" .. ModList.PRESET_FILE
 
 local function readAll(reader)
@@ -54,7 +55,11 @@ local function writeChecked(path, lines, ending)
     end
     writer:close()
     local back = Files.read(path)
-    return back ~= nil and Text.same(back, lines)
+    if back == nil or not Text.same(back, lines) then
+        return false
+    end
+    Build.written(path)
+    return true
 end
 
 -- True only when the file reads back as exactly these lines: getFileWriter truncates first and its PrintWriter
@@ -65,11 +70,7 @@ function Files.write(path, lines, ending)
 end
 
 function Files.list(folder)
-    local names = {}
-    local found = listFilesInZomboidLuaDirectory(folder)
-    for i = 0, found:size() - 1 do
-        names[#names + 1] = found:get(i)
-    end
+    local names = Build.list(folder)
     table.sort(names)
     return names
 end

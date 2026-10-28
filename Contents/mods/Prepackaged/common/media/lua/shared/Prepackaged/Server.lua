@@ -1,10 +1,11 @@
 -- A server preset set up from a pack: the job kept across the reloads, the files it touches, and the Host screen's memory.
+local Build = require "Prepackaged/Build"
 local Text = require "Prepackaged/Text"
 
 local Server = {}
 
-Server.FILE = "Prepackaged/host.txt"
-Server.LINES = "Prepackaged/server"
+Server.FILE = Build.FOLDER .. "/host.txt"
+Server.LINES = Build.FOLDER .. "/server"
 -- The Host screen offers 512 + n * 256 MB for n from 1 to 62, and shows any other value as its first choice
 -- (CoopOptionsScreen.lua:178-184, 345-350).
 local MEMORY_STEP, MEMORY_BASE, MEMORY_CHOICES = 256, 512, 62

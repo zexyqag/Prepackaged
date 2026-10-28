@@ -1,6 +1,6 @@
 # Prepackaged
 
-A Project Zomboid Build 42 mod that turns a mod pack into a guided setup. A pack author ships one small pack file; Prepackaged finds it and enables the pack's mods in the pack's load order, after a review of every change.
+A Project Zomboid mod for Build 41 and Build 42 that turns a mod pack into a guided setup. A pack author ships one small pack file; Prepackaged finds it and enables the pack's mods in the pack's load order, after a review of every change.
 
 > **Status: in development.** Pack discovery, mod enabling, the key bind and mod option defaults, the subscription helper, sandbox settings and server setup exist so far. The pack format may still change.
 
@@ -26,6 +26,15 @@ A pack's sandbox settings belong to a world or a server, so using a pack changes
 
 **Server** in the Prepackaged window, for the selected pack: **Copy server lines** puts the `WorkshopItems`, `Mods` and `Map` lines for a dedicated server's `.ini`, and the lines to add to the end of its `_SandboxVars.lua`, on the clipboard and in `Zomboid/Lua/Prepackaged/server/<id>.txt`. A new server writes both files when it first starts, so start it once before adding them. **Set up a server** makes or changes a server preset in `Zomboid/Server` for Host and opens the Host screen with it, after listing every file it changes. A preset it changes is backed up first, and Restore puts it back. A mod's sandbox settings exist only while the mod is loaded, so when the pack's mods, or the mods of the preset it changes, aren't all loaded, the game reloads its mods with them, then with your own list again.
 
+## On Build 41
+
+The same Workshop item works on Build 41, with what Build 41 can do:
+
+- Prepackaged keeps its files in `Zomboid/Lua/Prepackaged41`, and names its sandbox presets `Pack <id> 41` and its server presets `<id>-41`, as both builds use the same `Zomboid` folder. Both builds read the same mod list, so using a pack on one changes the list the other starts with.
+- A pack file put in the packs folder by hand isn't found: paste it with **Paste a pack** instead.
+- Key binds go into `keys.ini`, one key each, so a pack's bind with a second key or a modifier key isn't used. Build 41 has no mod options of its own, so a pack's mod options aren't used either. The review lists both under the entries that can't be used.
+- There is no **Save as my preset**: Build 41's Mods screen has no presets.
+
 ## Map packs
 
 The [map pack page](https://zexyqag.github.io/Prepackaged/) builds a pack of map mods from the [Zomboid Map Index](https://github.com/zexyqag/Zomboid-Map-Index), for any build of the game the index has, such as Build 41 or Build 42. Add maps from its list, which shows each map's cells, subscribers, how many subscribers it kept and its Workshop rating, or let **Suggest** fill the pack: it adds the maps that do best by your priorities (more maps, more cells, more spawn points, more subscribers, better rated, fewer Workshop items, fewer tile packs, a smaller download and more), either in the order you put them or weighed against each other into one score with a slider for each, within limits such as no tile packs, a lowest Workshop rating, or at most so many items or megabytes to download, and never puts two of its maps on one cell. Maps you add yourself may overlap: the pack's map order decides which one the game takes on those cells, and the page says where. A map that needs others, through its mods or as a required item on the Workshop, comes with them and goes above them in the map order, so a patch that joins two overlapping maps lets Suggest put both in. The page shows the pack on a grid and gives the pack file to use with **Paste a pack**; its address holds the pack, so you can share it, and it can load a pack file to keep working on it. Maps that need a mod the index doesn't have are marked, and Suggest leaves them out.
@@ -34,7 +43,7 @@ The [map pack page](https://zexyqag.github.io/Prepackaged/) builds a pack of map
 
 ### Pack file format
 
-A pack mod is a normal Build 42 mod (`42/mod.info` and `common/`) with a `prepackaged.txt`. The game reads it from the mod's version folder (the highest one not newer than the game, such as `42` or `42.20`) when it is there, else from `common/`. The file is plain text, read line by line and never run as code.
+A pack mod is a normal Build 42 mod (`42/mod.info` and `common/`) with a `prepackaged.txt`. The game reads it from the mod's version folder (the highest one not newer than the game, such as `42` or `42.20`) when it is there, else from `common/`. For Build 41, the pack mod has a `mod.info` and a `prepackaged.txt` at the mod's root, which Build 42 doesn't read, so one pack mod can carry a pack for each build, each with the mods of its build. The file is plain text, read line by line and never run as code.
 
 - Lines starting with `#` are comments. CRLF, LF and a UTF-8 byte order mark are fine.
 - `@section` lines start a section. Unknown sections are skipped with a warning.
@@ -46,12 +55,12 @@ A pack mod is a normal Build 42 mod (`42/mod.info` and `common/`) with a `prepac
 | `@pack` | `key = value`. Required: `id` (1 to 48 of `A-Z a-z 0-9 _ -`), `version` (`MAJOR.MINOR.PATCH`, such as `1.4.2`: three whole numbers without leading zeros, raised on every change, and compared part by part; raise MAJOR when existing worlds may not survive the update), `WorkshopItems` and `Mods` (`;`-separated, as in the server `.ini`). Mods are in load order and include `Prepackaged`, and for a pack inside a mod, that mod. With `@keys` or `@modoptions`, put `Prepackaged` first: mods that load before it can make a player's own mod options look like defaults, and the pack's details warn about it. Optional: `name`, `collection` (top collection IDs), `Map`, `MapOrder`, `needs`, `heap`, `hostmemory`. `MapOrder` lists map folders, `;`-separated, in priority order: the first wins where maps overlap. Without it, using the pack clears your map order and the game orders the maps by the mod list. List keys may repeat. |
 | `@optional` | `ModId` or `ModId = label`: mods the player can tick. |
 | `@collections` | `<collectionId> = <title> \| <itemId>;<itemId>;...`, one line per collection or sub-collection. A parent lists a child collection as `c:<collectionId>`. Subscriptions shows this tree; without it, only the top collection can be opened. |
-| `@keys` | `keysB42.ini` lines: `Name=key:<code>[;altCode:<code>][;shift:true][;ctrl:true][;alt:true]`; a code may be a `KEY_` name. |
+| `@keys` | `keysB42.ini` lines: `Name=key:<code>[;altCode:<code>][;shift:true][;ctrl:true][;alt:true]`; a code may be a `KEY_` name. Build 41's `keys.ini` lines, `Name=<code>`, work too. |
 | `@modoptions` | `ModOptions.ini` lines: `type\|page\|option\|value`. A `textentry` value is kept exactly as written, spaces included. |
 | `@sandbox` | Sandbox preset lines: `FullName=value`. |
 | `@locks` | `Page` or `Page.option`, split at the first `.`, for a Mod Options Control rules file. |
 
-Lines from your own `keysB42.ini`, `ModOptions.ini`, a sandbox preset and the server `.ini` can be pasted as they are.
+Lines from your own `keysB42.ini` or `keys.ini`, `ModOptions.ini`, a sandbox preset and the server `.ini` can be pasted as they are.
 
 ```
 # Prepackaged pack file

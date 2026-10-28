@@ -4,6 +4,7 @@
 -- (ServerSettingsScreen.lua:3087-3098), and the player's own list again after. The job is kept in a file across both
 -- reloads.
 local Backup = require "Prepackaged/Backup"
+local Build = require "Prepackaged/Build"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local Parse = require "Prepackaged/Parse"
@@ -61,7 +62,7 @@ function Host.check(text)
     local manager = getServerSettingsManager()
     if not manager:isValidName(name) then
         return { problem = getText("UI_Prepackaged_HostBadName", name) }
-    elseif not manager:settingsFolderValidLengthChecks(name) then
+    elseif not Build.nameFits(manager, name) then
         return { problem = getText("UI_Prepackaged_HostLongName", name) }
     end
     local check = { name = name, exists = {}, existing = false }

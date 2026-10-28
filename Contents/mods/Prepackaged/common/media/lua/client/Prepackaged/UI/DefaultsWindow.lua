@@ -1,4 +1,5 @@
 require "ISUI/ISPanel"
+local Build = require "Prepackaged/Build"
 local Defaults = require "Prepackaged/Defaults"
 local Files = require "Prepackaged/Files"
 local Rows = require "Prepackaged/Rows"
@@ -34,11 +35,11 @@ function DefaultsWindow:createChildren()
     self:addChild(self.list)
 
     self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_NotNow") }, self.onBack)
-    self.backButton:enableCancelColor()
+    Build.cancel(self.backButton)
     self.allButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_ShowAll"), getText("UI_Prepackaged_ShowNew") }, self.onAll)
     self.applyButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Apply") }, self.onApply)
     self.applyButton:setX(self.width - UI_BORDER_SPACING - self.applyButton.width)
-    self.applyButton:enableAcceptColor()
+    Build.accept(self.applyButton)
     self:update()
 end
 

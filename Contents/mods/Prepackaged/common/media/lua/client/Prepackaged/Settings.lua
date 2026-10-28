@@ -1,6 +1,7 @@
 -- The game's key binds and mod options: read for the defaults review, backed up, written the way the options screen
 -- writes them, and restored.
 local Backup = require "Prepackaged/Backup"
+local Build = require "Prepackaged/Build"
 local Defaults = require "Prepackaged/Defaults"
 local Files = require "Prepackaged/Files"
 local Parse = require "Prepackaged/Parse"
@@ -12,8 +13,8 @@ local Version = require "Prepackaged/Version"
 
 local Settings = {}
 
-Settings.KEYS = "keysB42.ini"
-Settings.OPTIONS = "ModOptions.ini"
+Settings.KEYS = Build.KEYS
+Settings.OPTIONS = Build.OPTIONS
 local TYPES = { tickbox = true, textentry = true, slider = true, combobox = true, multipletickbox = true, colorpicker = true, keybind = true }
 
 local function modOptions()
@@ -330,14 +331,6 @@ function Settings.names(pack)
     return { pack = Rows.name(pack), version = pack.version, value = Settings.show, key = keyName }
 end
 
--- MainOptions.loadKeys reads keys.ini while there is no keysB42.ini (MainOptions.lua:3520-3525).
-local function keysSource()
-    if cacheFileExists("keys.ini") and not cacheFileExists(Settings.KEYS) then
-        return "keys.ini"
-    end
-    return Settings.KEYS
-end
-
 local function failed(key, ...)
     return { error = key, args = { ... } }
 end
@@ -346,7 +339,7 @@ end
 local function backUp(before)
     local backup = {
         n = Backup.next(Files.fileBackups()), date = os.date(Backup.DATE), before = before,
-        keys = Files.read(keysSource()) or {}, options = Files.read(Settings.OPTIONS) or {},
+        keys = Files.read(Build.keysSource()) or {}, options = Settings.OPTIONS and Files.read(Settings.OPTIONS) or {},
     }
     if not Files.saveFileBackup(backup) then
         return nil, Backup.path(Backup.FILES, backup.n)
@@ -389,18 +382,12 @@ local function setOption(option, value)
     end
 end
 
-local function showBind(t)
-    if t.btn ~= nil and type(MainOptions.getKeyPrefix) == "function" then
-        t.btn:setTitle(MainOptions.getKeyPrefix(t) .. getKeyName(t.keyCode))
-    end
-end
-
 -- saveKeys adds each bind to the game's key map as it writes it, and rebind does after a failed save.
 local function setBind(target, bind)
     local k, t = target.keys, target.text
     k.key, k.altCode, k.shift, k.ctrl, k.alt = bind.key, bind.altCode, bind.shift, bind.ctrl, bind.alt
     t.keyCode, t.altCode, t.shift, t.ctrl, t.alt = bind.key, bind.altCode, bind.shift, bind.ctrl, bind.alt
-    showBind(t)
+    Build.showBind(t)
 end
 
 -- The options screen's two copies of a bind, as setBind finds them.
@@ -416,7 +403,7 @@ local function putBind(target, before)
     local k, t, a, b = target.keys, target.text, before.keys, before.text
     k.key, k.altCode, k.shift, k.ctrl, k.alt = a.key, a.altCode, a.shift, a.ctrl, a.alt
     t.keyCode, t.altCode, t.shift, t.ctrl, t.alt = b.keyCode, b.altCode, b.shift, b.ctrl, b.alt
-    showBind(t)
+    Build.showBind(t)
 end
 
 -- saveKeys empties the game's key map, then adds each bind as it writes it (MainOptions.lua:3706-3743). After it
@@ -424,7 +411,7 @@ end
 local function rebind()
     for _, t in ipairs(MainOptions.keyText) do
         if type(t) == "table" and t.value == nil then
-            pcall(function() getCore():addKeyBinding(t.txt:getName(), t.keyCode, t.altCode, t.shift or false, t.ctrl or false, t.alt or false) end)
+            pcall(Build.addBind, t)
         end
     end
 end
@@ -509,7 +496,7 @@ end
 
 local function savedOptions()
     local saved = {}
-    for _, line in ipairs(Files.read(Settings.OPTIONS) or {}) do
+    for _, line in ipairs(Settings.OPTIONS and Files.read(Settings.OPTIONS) or {}) do
         local f = Text.split(line, "|")
         if #f >= 4 then
             saved[f[2] .. "|" .. f[3]] = { type = f[1], text = Text.after(line, 3) }
@@ -629,7 +616,7 @@ function Settings.restore(backup)
     if not Files.write(Settings.KEYS, backup.keys, "\r\n") then
         return failed("UI_Prepackaged_FailRestoreFile", Settings.KEYS, current.n)
     end
-    if not Files.write(Settings.OPTIONS, backup.options, "\r\n") then
+    if Settings.OPTIONS and not Files.write(Settings.OPTIONS, backup.options, "\r\n") then
         return failed("UI_Prepackaged_FailRestoreFile", Settings.OPTIONS, current.n)
     end
     getCore():ResetLua("default", Backup.RESET_REASON)

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """The Publish workflow's decisions: the latest version, the next one from the commits since it, whether there is
-anything to publish, the change log as release notes (Markdown) and as the Steam change note, and the version in the
-uploaded mod.info files.
+anything to publish, the change log as release notes (Markdown) and as the Steam change note, the uploaded files with
+Build 41's mod at each mod's root, and the version in the uploaded mod.info files.
 
     python3 publish.py latest RELEASES
     python3 publish.py plan --since TAG --commits FILE      (TAG empty: the first release)
     python3 publish.py notes --out FILE --commits FILE [--notes TEXT]
     python3 publish.py steam --notes FILE --version VERSION --url URL --out FILE
+    python3 publish.py stage FOLDER
     python3 publish.py modversion --version VERSION FOLDER
 
 Step outputs go to the file $GITHUB_OUTPUT names; plan sets MODE, TAG and VERSION for the later steps in $GITHUB_ENV.
@@ -15,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -287,6 +289,52 @@ def steam(markdown, version, url):
     return "\n".join(kept).rstrip("\n") + pointer
 
 
+# ---------------------------------------------------------------------------------------------- the uploaded files
+def ui_text(language, translations):
+    """Build 41's UI_<language>.txt for Build 42's UI.json: the game skips the first line, then takes each value as the
+    text between the first and the last quote of its line, with no escapes (Translator.java:343-450 of 41.78)."""
+    lines = [f"UI_{language} = {{"]
+    for key, value in translations.items():
+        if "\n" in value or "\r" in value:
+            raise Failure(f"the translation {key} has a line break, which Build 41 can't read")
+        lines.append(f'    {key} = "{value}",')
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def stage(folder):
+    """Contents/ into folder as Steam gets it. Build 42 reads common/ and its version folders, Build 41 only the mod's
+    root, so a mod with a 41/ folder gets Build 41's mod there: 41/mod.info, the files it names from 41/ or else from a
+    version folder of Build 42, and common/media with 41/media over it, translations as Build 41 reads them."""
+    target = folder / "Contents"
+    shutil.copytree("Contents", target)
+    for b41 in sorted(target.glob("mods/*/41")):
+        mod = b41.parent
+        info = (b41 / "mod.info").read_text(encoding="utf-8")
+        # Build 41 renames the mod after any line that holds name= (ChooseGameInfo.java:335-345 of 41.78).
+        if any("name=" in line for line in info.splitlines() if not line.startswith("name=")):
+            raise Failure(f"{b41.relative_to(folder)}/mod.info has name= in a line of its own other than the first, which Build 41 reads as the mod's name")
+        for line in info.splitlines():
+            if line.startswith("poster="):
+                name = line[len("poster="):]
+                found = [b41 / name] + sorted(mod.glob(f"4[2-9]*/{name}"))
+                source = next((f for f in found if f.is_file()), None)
+                if source is None:
+                    raise Failure(f"{b41.relative_to(folder)}/mod.info names the poster {name}, which neither 41/ nor a version folder of Build 42 has")
+                shutil.copy2(source, mod / name)
+        shutil.copy2(b41 / "mod.info", mod / "mod.info")
+        if (mod / "common" / "media").is_dir():
+            shutil.copytree(mod / "common" / "media", mod / "media", dirs_exist_ok=True)
+        if (b41 / "media").is_dir():
+            shutil.copytree(b41 / "media", mod / "media", dirs_exist_ok=True)
+        for ui in sorted((mod / "media").glob("lua/shared/Translate/*/UI.json")):
+            language = ui.parent.name
+            (ui.parent / f"UI_{language}.txt").write_text(ui_text(language, json.loads(ui.read_text(encoding="utf-8"))), encoding="utf-8")
+            ui.unlink()
+        shutil.rmtree(b41)
+        print(f"{mod.relative_to(folder)}: Build 41's mod at the root")
+
+
 # ---------------------------------------------------------------------------------------------- the uploaded mod.info
 
 def with_modversion(text, version):
@@ -324,6 +372,8 @@ def main():
     p.add_argument("--version", required=True)
     p.add_argument("--url", required=True)
     p.add_argument("--out", type=Path, required=True)
+    p = sub.add_parser("stage")
+    p.add_argument("folder", type=Path)
     p = sub.add_parser("modversion")
     p.add_argument("--version", required=True)
     p.add_argument("folder", type=Path)
@@ -359,6 +409,8 @@ def main():
         print(text)
     elif args.command == "steam":
         args.out.write_text(steam(args.notes.read_text(encoding="utf-8"), args.version, args.url), encoding="utf-8")
+    elif args.command == "stage":
+        stage(args.folder)
     elif args.command == "modversion":
         if not VERSION.fullmatch(args.version):
             raise Failure(f"--version {args.version} is not MAJOR.MINOR.PATCH")

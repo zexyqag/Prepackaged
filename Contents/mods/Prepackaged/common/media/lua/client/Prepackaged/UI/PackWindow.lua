@@ -1,4 +1,5 @@
 require "ISUI/ISPanel"
+local Build = require "Prepackaged/Build"
 local DefaultsWindow = require "Prepackaged/UI/DefaultsWindow"
 local Discovery = require "Prepackaged/Discovery"
 local Enable = require "Prepackaged/Enable"
@@ -68,10 +69,10 @@ function PackWindow:createChildren()
         self[b[1]] = Widgets.button(self, x, bottom, { getText(b[2]) }, self[b[3]])
         x = self[b[1]]:getRight() + UI_BORDER_SPACING
     end
-    self.backButton:enableCancelColor()
+    Build.cancel(self.backButton)
     self.useButton = Widgets.button(self, 0, bottom, { getText(RIGHT[1]), getText(RIGHT[2]) }, self.onUse)
     self.useButton:setX(self.width - UI_BORDER_SPACING - self.useButton.width)
-    self.useButton:enableAcceptColor()
+    Build.accept(self.useButton)
     self:refresh()
 end
 
@@ -150,7 +151,7 @@ end
 function PackWindow:onSelect(data)
     self.entry = data and data.entry
     if self.entry == nil then
-        self.details:setRows({ { style = "note", key = "UI_Prepackaged_NoPacks", args = {} } })
+        self.details:setRows({ { style = "note", key = Build.DROPPED_PACKS and "UI_Prepackaged_NoPacks" or "UI_Prepackaged_NoPacksPaste", args = { Build.FOLDER .. "/packs" } } })
         self.useButton:setEnable(false)
         self.subscriptionsButton:setEnable(false)
         self.serverButton:setEnable(false)

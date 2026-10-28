@@ -1,4 +1,5 @@
 local Backup = require "Prepackaged/Backup"
+local Build = require "Prepackaged/Build"
 local Discovery = require "Prepackaged/Discovery"
 local Files = require "Prepackaged/Files"
 local ModList = require "Prepackaged/ModList"
@@ -61,11 +62,8 @@ end
 
 function Enable.rules(id)
     local info = getModInfoByID(id)
-    return {
-        require = ids(info and info:getRequire()),
-        loadModAfter = ids(info and info:getLoadAfter()),
-        loadModBefore = ids(info and info:getLoadBefore()),
-    }
+    local after, before = Build.loadOrder(info)
+    return { require = ids(info and info:getRequire()), loadModAfter = ids(after), loadModBefore = ids(before) }
 end
 
 local function items(list)

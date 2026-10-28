@@ -1,4 +1,5 @@
 -- Text from a pack is only ever an argument or a row's literal text, never a format.
+local Build = require "Prepackaged/Build"
 local Parse = require "Prepackaged/Parse"
 local Sandbox = require "Prepackaged/Sandbox"
 local Server = require "Prepackaged/Server"
@@ -51,7 +52,7 @@ function Rows.source(entry)
     if entry.source == "mod" then
         return { key = entry.enabled and "UI_Prepackaged_SourceModOn" or "UI_Prepackaged_SourceModOff", args = { entry.modName, entry.name } }
     elseif entry.source == "file" then
-        return { key = "UI_Prepackaged_SourceFile", args = { entry.name } }
+        return { key = "UI_Prepackaged_SourceFile", args = { Build.FOLDER .. "/packs/" .. entry.name } }
     end
     return { key = "UI_Prepackaged_SourceClipboard", args = {} }
 end
@@ -442,8 +443,10 @@ function Rows.backup(backup, of)
         return rows
     end
     if backup.kind == "files" then
-        text(rows, "text", "UI_Prepackaged_FilesKeys", #backup.keys)
-        text(rows, "text", "UI_Prepackaged_FilesOptions", #backup.options)
+        text(rows, "text", "UI_Prepackaged_FilesLines", Build.KEYS, #backup.keys)
+        if Build.OPTIONS then
+            text(rows, "text", "UI_Prepackaged_FilesLines", Build.OPTIONS, #backup.options)
+        end
         text(rows, "note", "UI_Prepackaged_FilesRestore")
         return rows
     end

@@ -274,6 +274,11 @@ end
 
 local function keyPart(bind, part)
     local name, value = splitAt(part, ":")
+    -- A code alone is the key, as keys.ini holds a bind.
+    if name == nil and bind.key == nil and isKeyCode(part) then
+        bind.key = keyCode(part)
+        return true
+    end
     if name == "key" or name == "altCode" then
         if not isKeyCode(value) then
             return false
@@ -300,7 +305,7 @@ local function keySpec(spec)
     return bind, bad
 end
 
--- A keysB42.ini value such as key:34;shift:true, or nil.
+-- A keysB42.ini value such as key:34;shift:true, or a keys.ini one such as 34, or nil.
 function Parse.bindSpec(spec)
     local bind, bad = keySpec(spec)
     if bind.key == nil or #bad > 0 then

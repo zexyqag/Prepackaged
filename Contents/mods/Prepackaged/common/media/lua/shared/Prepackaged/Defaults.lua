@@ -1,6 +1,7 @@
 -- What each @keys and @modoptions entry of the pack in use needs, judged against the game as it is loaded now, and the
 -- keys that end up on more than one bind. Values: a bind is { key, altCode, shift, ctrl, alt }; a mod option holds what
 -- its type holds (combobox the index, multipletickbox a list of booleans, colorpicker { r, g, b, a }).
+local Build = require "Prepackaged/Build"
 local Parse = require "Prepackaged/Parse"
 
 local Defaults = {}
@@ -160,6 +161,8 @@ function Defaults.review(args)
         local target = targets.binds[bind.name]
         if value == nil then
             put(review.invalid, item, "KeyName", { bad })
+        elseif not Build.bindFits(value) then
+            put(review.invalid, item, "Build", { Build.NUMBER })
         elseif target == nil then
             absent(item, "binds", "NotLoaded")
         else
@@ -176,6 +179,8 @@ function Defaults.review(args)
         local target = targets.options[key]
         if value == nil then
             put(review.invalid, item, "KeyName", { m.value })
+        elseif not Build.OPTIONS then
+            put(review.invalid, item, "Build", { Build.NUMBER })
         elseif target == nil then
             absent(item, "options", targets.unread[key] and "NotRead" or targets.pages[m.page] and "NoOption" or "NotLoaded")
         else

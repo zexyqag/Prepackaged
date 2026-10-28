@@ -140,7 +140,7 @@ jobs:
           mkdir -p "$item"
           cp preview.png "$item/"
           if [ "$MODE" != page ]; then
-            cp -R Contents "$item/"
+            python3 publish.py stage "$item"
             python3 publish.py modversion --version "$VERSION" "$item/Contents"
           fi
 

@@ -1,0 +1,4 @@
+name=Prepackaged
+id=Prepackaged
+description=Turns a mod pack into a guided setup. Finds pack files in installed mods or on the clipboard, and enables the pack's mods in its load order after a review, with optional mods to tick. Your mod list is backed up first and can be restored, and mods you add yourself are kept when the pack updates. The pack's key binds are offered in a review, and only what you tick changes. Apply pack on the New Game sandbox screen fills in the pack's sandbox settings, and Server sets up a server for Host or copies the lines a dedicated server needs.
+poster=poster.png

@@ -1,5 +1,6 @@
 require "ISUI/ISPanel"
 local Backup = require "Prepackaged/Backup"
+local Build = require "Prepackaged/Build"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local Host = require "Prepackaged/Host"
@@ -40,10 +41,10 @@ function RestoreWindow:createChildren()
     self:addChild(self.details)
 
     self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_btn_back") }, self.onBack)
-    self.backButton:enableCancelColor()
+    Build.cancel(self.backButton)
     self.restoreButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_RestoreThis") }, self.onRestore)
     self.restoreButton:setX(self.width - UI_BORDER_SPACING - self.restoreButton.width)
-    self.restoreButton:enableAcceptColor()
+    Build.accept(self.restoreButton)
     self:refresh()
 end
 

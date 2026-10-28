@@ -4,7 +4,7 @@ Bug reports and ideas are welcome as GitHub issues. Using a pack and the pack fi
 
 ## Repository layout
 
-- `Contents/mods/Prepackaged/`: the mod, as the Workshop item holds it. `42/` has `mod.info`, `poster.png` and the Lua in `media/lua/` (`shared/` and `client/`, the windows in `client/Prepackaged/UI/`); `common/` has the English translations.
+- `Contents/mods/Prepackaged/`: the mod. `common/media/lua/` has the Lua both builds run (`shared/` and `client/`, the windows in `client/Prepackaged/UI/`) and the English translations; `42/` and `41/` have each build's `mod.info` and `Prepackaged/Build` module, which holds what differs between them. Build 41 reads only the mod's root, so the upload puts Build 41's mod there (`publish.py stage`): `41/mod.info`, the poster of `42/`, `common/media` with `41/media` over it, and the translations as `UI_EN.txt`.
 - `workshop.txt`: the Workshop page: the item's `id=`, title, description, tags and visibility.
 - `preview.png`: the Workshop preview image.
 - `publish.py` and `.github/workflows/publish.yml`: the release workflow.
@@ -27,4 +27,5 @@ A scope is fine (`fix(fog): ...`).
 ## Changes
 
 - The Lua runs in the game's Kahlua, a Lua 5.1 implementation, so later Lua features such as `goto`, `//` and bitwise operators aren't available.
-- New player-facing texts go in the English translations under `common/`.
+- New player-facing texts go in the English translations under `common/`, on one line each, as Build 41 reads them.
+- What only one build has goes in the `Build` modules of `41/` and `42/`, not in `common/`.

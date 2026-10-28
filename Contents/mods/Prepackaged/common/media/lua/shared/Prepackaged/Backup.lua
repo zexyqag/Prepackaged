@@ -1,10 +1,11 @@
+local Build = require "Prepackaged/Build"
 local State = require "Prepackaged/State"
 local Text = require "Prepackaged/Text"
 
 local Backup = {}
 
-Backup.FOLDER = "Prepackaged/backups"
--- keysB42.ini and ModOptions.ini, as copies taken before Prepackaged writes them.
+Backup.FOLDER = Build.FOLDER .. "/backups"
+-- The key binds and mod options files, as copies taken before Prepackaged writes them.
 Backup.FILES = Backup.FOLDER .. "/binds"
 -- Server presets as the game reads them, before Prepackaged sets one up or restores one.
 Backup.SERVERS = Backup.FOLDER .. "/servers"

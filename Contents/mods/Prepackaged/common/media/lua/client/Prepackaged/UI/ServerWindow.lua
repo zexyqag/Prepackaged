@@ -1,5 +1,6 @@
 require "ISUI/ISPanel"
 require "ISUI/ISTextBox"
+local Build = require "Prepackaged/Build"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
 local Host = require "Prepackaged/Host"
@@ -33,11 +34,11 @@ function ServerWindow:createChildren()
     self:addChild(self.list)
 
     self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_btn_back") }, self.onBack)
-    self.backButton:enableCancelColor()
+    Build.cancel(self.backButton)
     self.copyButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_LinesCopy") }, self.onCopy)
     self.hostButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_HostButton") }, self.onHost)
     self.hostButton:setX(self.width - UI_BORDER_SPACING - self.hostButton.width)
-    self.hostButton:enableAcceptColor()
+    Build.accept(self.hostButton)
     self:update()
 end
 
@@ -89,7 +90,7 @@ end
 function ServerWindow:onHost()
     local w, h = 280, 180
     local modal = ISTextBox:new((getCore():getScreenWidth() - w) / 2, (getCore():getScreenHeight() - h) / 2, w, h, getText("UI_Prepackaged_HostPrompt"),
-        self.entry.result.pack.id, self, self.onHostName)
+        Build.serverName(self.entry.result.pack.id), self, self.onHostName)
     modal.backgroundColor.a = 0.9
     modal:initialise()
     modal:setAlwaysOnTop(true)

@@ -1,10 +1,11 @@
+local Build = require "Prepackaged/Build"
 local Sandbox = require "Prepackaged/Sandbox"
 local Text = require "Prepackaged/Text"
 local Version = require "Prepackaged/Version"
 
 local State = {}
 
-State.FILE = "Prepackaged/state.txt"
+State.FILE = Build.FOLDER .. "/state.txt"
 State.FORMAT = 1
 local DECISIONS = { applied = true, declined = true, same = true }
 

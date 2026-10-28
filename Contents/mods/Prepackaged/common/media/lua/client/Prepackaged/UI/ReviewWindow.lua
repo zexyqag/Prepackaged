@@ -1,5 +1,6 @@
 require "ISUI/ISPanel"
 require "ISUI/ISTextBox"
+local Build = require "Prepackaged/Build"
 local Discovery = require "Prepackaged/Discovery"
 local Enable = require "Prepackaged/Enable"
 local Files = require "Prepackaged/Files"
@@ -37,12 +38,16 @@ function ReviewWindow:createChildren()
     self:addChild(self.list)
 
     self.backButton = Widgets.button(self, UI_BORDER_SPACING, bottom, { getText("UI_btn_back") }, self.onBack)
-    self.backButton:enableCancelColor()
-    self.presetButton = Widgets.button(self, self.backButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_SavePreset") }, self.onPreset)
-    self.subscriptionsButton = Widgets.button(self, self.presetButton:getRight() + UI_BORDER_SPACING, bottom, { getText("UI_Prepackaged_Subscriptions") }, self.onSubscriptions)
+    Build.cancel(self.backButton)
+    local x = self.backButton:getRight() + UI_BORDER_SPACING
+    if Build.MOD_LIST_PRESETS then
+        self.presetButton = Widgets.button(self, x, bottom, { getText("UI_Prepackaged_SavePreset") }, self.onPreset)
+        x = self.presetButton:getRight() + UI_BORDER_SPACING
+    end
+    self.subscriptionsButton = Widgets.button(self, x, bottom, { getText("UI_Prepackaged_Subscriptions") }, self.onSubscriptions)
     self.applyButton = Widgets.button(self, 0, bottom, { getText("UI_Prepackaged_Apply") }, self.onApply)
     self.applyButton:setX(self.width - UI_BORDER_SPACING - self.applyButton.width)
-    self.applyButton:enableAcceptColor()
+    Build.accept(self.applyButton)
     self:update()
 end
 

@@ -2,6 +2,8 @@ require "ISUI/ISButton"
 require "ISUI/ISModalDialog"
 require "ISUI/ISScrollingListBox"
 
+local Build = require "Prepackaged/Build"
+
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local UI_BORDER_SPACING = 10
@@ -151,7 +153,7 @@ function RowList:new(x, y, width, height)
     o.backgroundColor = { r = 0, g = 0, b = 0, a = 0.3 }
     o.borderColor = { r = 1, g = 1, b = 1, a = 0.2 }
     o.drawBorder = true
-    o.tickTexture = getTexture("media/ui/inventoryPanes/Tickbox_Tick.png")
+    o.tickTexture = getTexture(Build.TICK)
     o.openTitle = getText("UI_Prepackaged_Open")
     o.openWidth = getTextManager():MeasureStringX(UIFont.Small, o.openTitle) + UI_BORDER_SPACING * 2
     return o
@@ -258,9 +260,9 @@ end
 
 function PackList:doDrawItem(y, item, alt)
     if self.selected == item.index then
-        self:drawSelection(0, y, self:getWidth(), item.height - 1)
+        Build.drawSelection(self, 0, y, self:getWidth(), item.height - 1)
     elseif self.mouseoverselected == item.index and self:isMouseOver() and not self:isMouseOverScrollBar() then
-        self:drawMouseOverHighlight(0, y, self:getWidth(), item.height - 1)
+        Build.drawMouseOver(self, 0, y, self:getWidth(), item.height - 1)
     end
     self:drawRectBorder(0, y, self:getWidth(), item.height, 0.5, self.borderColor.r, self.borderColor.g, self.borderColor.b)
     local data = item.item
