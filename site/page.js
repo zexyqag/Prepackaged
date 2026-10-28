@@ -1,10 +1,10 @@
-// The map pack page: reads the Zomboid Map Index's Build 42 file from the address in <html data-index>, and builds a
+// The map pack page: reads the Zomboid Map Index at the address in <html data-index>, the file of the build in the
+// page's address or else of the newest build it has, and builds a
 // pack from the maps added by hand or by Suggest, shown on the grid, as a list in Map= order and as a pack file. The
 // pack lives in the page's address, Suggest's settings in this browser.
 import * as Grid from './grid.js';
 import { CRITERIA, PRESETS, describePack, packText, rating, readBuild, readPack, scores, suggest, validId, workshopUrl } from './packs.js';
 
-const BUILD = 42;
 const SETTINGS = 'prepackaged-map-packs';
 const PAGE = 50;
 const $ = id => document.getElementById(id);
@@ -19,6 +19,7 @@ const state = {
   limits: {},
   showOthers: true,
   page: 0,
+  build: null,
 };
 let read = null;
 let pack = null;
@@ -50,7 +51,7 @@ function message(text) {
   $('message').textContent = text;
 }
 
-// The pack in the page's address: maps=<keys in Map= order>&out=<left out of suggestions>&id=&name=.
+// The pack in the page's address: build=<build>&maps=<keys in Map= order>&out=<left out of suggestions>&id=&name=.
 function readAddress() {
   const params = new URLSearchParams(location.hash.slice(1));
   const keys = (params.get('maps') ?? '').split(',').filter(k => read.byKey.has(k));
@@ -61,6 +62,7 @@ function readAddress() {
 }
 function writeAddress() {
   const params = new URLSearchParams();
+  params.set('build', state.build);
   if (state.keys.length) params.set('maps', state.keys.join(','));
   if (state.leftOut.size) params.set('out', [...state.leftOut].join(','));
   params.set('id', $('pack-id').value);
@@ -490,9 +492,25 @@ function setUp() {
 
 async function start() {
   const base = document.documentElement.dataset.index;
-  const url = new URL(`build-${BUILD}.json`, base || undefined);
-  const build = await (await fetch(url, { cache: 'no-cache' }).then(r => (r.ok ? r : Promise.reject(new Error(`${r.status} ${r.statusText}`))))).json();
-  read = readBuild(build);
+  const json = async name => {
+    const response = await fetch(new URL(name, base || undefined), { cache: 'no-cache' });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return response.json();
+  };
+  const { builds } = await json('builds.json');
+  const asked = Number(new URLSearchParams(location.hash.slice(1)).get('build'));
+  const chosen = builds.find(b => b.build === asked) ?? builds[0];
+  if (!chosen) throw new Error('it has no builds');
+  state.build = chosen.build;
+  read = readBuild(await json(`build-${chosen.build}.json`));
+  $('build').replaceChildren(...builds.map(b => el('option', { value: b.build, textContent: `Build ${b.build} (${b.gameVersion})`, selected: b === chosen })));
+  // Another build has other map mods: the page starts again with it, keeping those of the pack it has too.
+  $('build').onchange = () => {
+    state.build = Number($('build').value);
+    writeAddress();
+    location.reload();
+  };
+  $('build-line').hidden = false;
   loadSettings();
   setUp();
   renderSettings();
